@@ -24,7 +24,7 @@
 module NonPosi2 (
    Term(..), NonPosi2(..), NP, PairNP, -- data types
    half, dup, sgn, -- from imported modules
-   i2terms, terms2i, pair2i, oneTerm, -- conversion
+   i2terms, terms2i, oneTerm, pair2i, -- conversion
    tNeg, neg, carry, add, sub, -- arithmetic & comparation
    pw2, npDup, npHlf, sqr, mul, npSqr, divStep,   -- geometric
    -- sqrtStep, sqrtRem, sqrtMod,  -- inverse
@@ -124,7 +124,7 @@ instance Enum Term where
 --------------------------------------------------------------
 -- 
 -- | Continued Logarithm (CL) == Differential Non-positional Binary
--- Accumulated C. Logarithm == Non-positional Binary (NB) 
+--   Accumulated C. Logarithm == Non-positional Binary (NB) 
 -- 
 ---------------------------------------------------------------------------
 
@@ -133,6 +133,9 @@ instance Enum Term where
 newtype NonPosi2 = NP [Term] deriving (Eq, Show, Read)
 type NP = NonPosi2   -- just for brevity
 type PairNP = (NonPosi2, NonPosi2)
+
+pair2i :: PairNP -> (Integer, Integer)
+pair2i (x, y) = (toInteger x, toInteger y)
 
 
 ---------------------------------------------------------------------------
@@ -184,8 +187,8 @@ instance Integral NonPosi2 where
       | end    = (0, rNext) 
       | True   = (qNew, rNew) 
       where
-      end   = qNext == 0   -- rs < ds  ==>  qNew == q
-      qNew  = qNext + q    -- accumulates q, without passing an accumulator
+      end   = tAbs qNext == 0   -- rs < ds  ==>  qNew == q
+      qNew  = NP [qNext] + q    -- accumulates q, without passing an accumulator
       (q, rNew)      = divMod rNext ds
       (qNext, rNext) = divStep rs ds
 
@@ -244,9 +247,6 @@ i2terms x = reverse $ i2terms' 0 x where
       | r ==  0   = i2terms' (2 + a) q 
       | True      = i2terms' (1 + a) (half n) -- 1 + dup q
       where (q, r) = quotMod 4 n
-
-pair2i :: (NonPosi2, NonPosi2) -> (Integer, Integer)
-pair2i (x, y) = (toInteger x, toInteger y)
 
 oneTerm :: Int -> NP
 oneTerm x 
@@ -388,15 +388,27 @@ mulF xs ys = quarter $ sub sqSub sqSum   -- 1/4(A^2 - B^2)
 ---------------------------------------------------------------------------
 
 
-divStep :: NonPosi2 -> NonPosi2  -> PairNP
-{- | Single division step. 
+divStep :: NonPosi2 -> NonPosi2  -> (Term, NonPosi2)
+{- | Single division step. (Not used yet)
    Returns  SINGLE TERM  quotient which minimizes absolute rest, 
    and the new rest; keeps 'r + q*d' = constant, where: 
    d = divisor; q = quotient; r = rest or module. -}
 divStep _ 0 = error "Divided by 0 in NonPosi2.divStep. "
-divStep 0 _ = (0, 0)
+divStep 0 _ = (T True 0, 0)
 divStep (NP r) (NP d) = minimumBy comp candidates
    where
+   -- positive rNew, reverse for optimization of steps 
+   candidates  = reverse $ (T True 0, NP r) : fmap qrPair digits 
+      where
+      T sr ar  = head r
+      T sd ad  = head d
+      digits   = [0 .. 1 + ar - ad]
+      
+      qrPair q = (qNew, NP rNew)
+         where 
+         qNew  = T (sr == sd) q
+         rDif  = mul [qNew] d
+         rNew  = sub rDif r
    
    comp (_, ra) (_, rb)
       | res == EQ && sgn rb   = GT  -- in order to prioritize positive rest
@@ -404,16 +416,7 @@ divStep (NP r) (NP d) = minimumBy comp candidates
       where 
       res = compare (S.abs ra) (S.abs rb)
       
-   -- positive rNew, reverse for optimization of steps 
-   candidates  = reverse $ (0, NP r) : fmap qrPair digits 
-      where
-      T sr ar  = head r
-      T sd ad  = head d
-      digits   = [0 .. 1 + ar - ad]
-      qrPair q = (qNew, rNew)
-         where 
-         qNew  = NP [T (sr == sd) q]
-         rNew  = NP r - qNew * NP d
+
 
 ---------------------------------------------------------------------------
    
