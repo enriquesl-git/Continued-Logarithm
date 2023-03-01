@@ -160,7 +160,7 @@ instance Enum NonPosi2 where
 
 instance Signed NonPosi2 where
 
-   (+.) a s          = a + NP [T s 0] -- a +- 1
+   (+.) s a          = a + NP [T s 0] -- a +- 1
    sgn (NP (x : _))  = tSgn x
    sgn _             = True
 
@@ -227,7 +227,7 @@ instance Real NonPosi2 where
 terms2i :: [Term] -> Integer
 terms2i = foldr transform 0 where
    transform (T s a) x 
-      = x + 2 ^ a *. s
+      = x + s *. 2 ^ a
       -- | s      = x + 2 ^ a
       -- | True   = x - 2 ^ a  -- for negative terms
 

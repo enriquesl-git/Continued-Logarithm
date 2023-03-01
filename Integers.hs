@@ -48,8 +48,8 @@ quotMod :: (Signed a, Integral a) => a -> a -> (a, a)
    It should keep: 'n = q*d + r', minimizing 'abs r'. 
 -}
 quotMod divisor n 
-   | -(r - ad) <  r  = (q +. sd, r - ad)  -- r > 0
-   |   r + ad <= -r  = (q -. sd, r + ad)  -- r < 0, limit included
+   | -(r - ad) <  r  = (sd +. q, r - ad)  -- r > 0
+   |   r + ad <= -r  = (sd -. q, r + ad)  -- r < 0, limit included
    | True            = (q, r)             -- |d| - |r| >= |r|
    where
    (sd, ad) = sgnAbs divisor
@@ -249,7 +249,7 @@ half = (iquot 2)  -- Half of an integer, rounded down
 
 ---------------------------
 -- | Continued Fractions
-
+-- 'cf n d' represents the ratio n/d, numerator/denominator. 
 cf :: (Signed a, Integral a) => a -> a -> [a]
 cf n 0 = []
 cf n d = q : cf d r
