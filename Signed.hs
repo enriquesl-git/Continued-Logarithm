@@ -12,7 +12,8 @@
 -- 
 -- It is defined a type class 'Signed', with functions to operate
 -- with a Bool value, which represents the sign.
--- This way, the sign, which is binary, is separated from the value.
+-- This way, the sign, which is binary, is separated from the value. 
+-- It is like the scalar product, the scalar being the (bool, &&) group. 
 --
 -- Types Integer, Int, and others can be instances of type class Signed.
 -- such that instances can be 'Int', 'Integer', etc,
@@ -32,52 +33,62 @@ infixl 6 +., -.
 
 -- class (Integral t, Read t) => Signed t where -- Integral not neccessary
 class (Num t, Ord t, Read t) => Signed t where
-   -- {-# MINIMAL sgn, (+.) #-}
-   chSgn :: Signed c =>             c -> t -> t
-   -- (+s), (-s) :: Signed c =>        c -> t -> t
-   (*.), (/.), (+.), (-.) ::              Bool -> t -> t
+   -- {-#  MINIMAL sgn, (*.), (+.)  #-}
+   
    sgnAbs ::                        t -> (Bool, t)
    sgn ::                           t -> Bool
    abs  ::                          t -> t
+   (*.), (/.), (+.), (-.) ::        t -> Bool -> t
+   -- (+s), (-s) :: Signed c =>        c -> t -> t
+   chSgn :: Signed c =>             c -> t -> t
    incr, decr ::                    t -> t -> t
-   signum :: Signed c =>            t -> c
 
-   -- Arithmetic with a boolean: True is like 1, False is like -1
-   (*.) True   = id
-   (*.) False  = negate
-   (/.)        = (*.)
-   (+.) True   = (+ 1)
-   (+.) False  = subtract 1
-   (-.)        = (+.) . not
 
-   -- Base function, gives False for negatives, True otherwise
+   -- Base function 'sgn', gives False for negatives, True otherwise
    -- It can be viewed as the inverse function of '(*.)',
    -- which takes a sign and a value to give a signed result
-   sgnAbs a    = (sa, sa *. a)   -- One step for both values, as in quotRem
+   sgn = (>= 0)
+   
+   -- One step for both values, as in quotRem
+   sgnAbs a = (sa, a *. sa)
       where sa = sgn a
 
-   sgn   = (>= 0)
-   abs   = snd . sgnAbs   -- abs is the rest of extracting sgn
+   -- abs is the rest of extracting sgn
+   abs = snd . sgnAbs
 
-   -- Useful functions, which avoids direct use of operators
-   signum      = (*. 1) . sgn   -- = 0 +. sgn a, returns {1, -1}
+
+   -- Arithmetic with a boolean: True is like 1, False is like -1
+   -- The Signed 'n' is scaled by the boolean
+   (*.) n True   = id n
+   (*.) n False  = negate n
+   (/.)          = (*.)
+   
+   (+.) n True   = (+ 1) n
+   (+.) n False  = (subtract 1) n
+   (-.) n        = (n +.) . not
+
+
+   -- change last argument sign from first argument sign
+   -- like (*.) with the sign of 'y'
+   chSgn y     = (*. sgn y)
+   -- chSgn     = (*.) $ sgn
+   
    -- increments/decrements the absolute vale,
-   -- that is, the sign of 'a' modifies 'n'
-   incr n a    = a + sgn a *. n
-   decr n a    = a - sgn a *. n
-   -- incr a      = sgn a +. a
-   -- decr a      = sgn a -. a
+   -- that is, the sign of 'a' modifies 'n', or 'n' is scaled by 'sgn a' and summed
+   -- like (+.) with the sign of 'a'
+   incr n a    = a + n *. sgn a  -- incr n (S sa va) = S sa (n + va)
+   decr n a    = a - n *. sgn a
+   -- succ a      = sgn a +. a
+   -- pred a      = sgn a -. a
 
-   chSgn y     = (sgn y *.)   -- change sign
    -- setSgn y  = chSgn y . abs
    -- setSgn y x  = sgn y *. abs x 
 
-   
+
 instance Signed Integer
 instance Signed Int
 instance Signed Word
 
--- instance Signed SInt
 instance Signed Bool
 --
 instance Num Bool where
@@ -114,18 +125,29 @@ sNeg (S s a) = S (not s) a
 
 ----
 
+instance Signed SInt where
+   
+   (+.) (S s a) True    = S s (a + 1)
+   (+.) (S s a) False   = S s (a - 1)
+   sgn (S s _)    = s
+   abs (S _ a)    = S True a
+   sgnAbs (S s a) = (s, S True a)
+
 instance Num SInt where
 
    fromInteger n  = S s (fromIntegral a)
       where (s, a) = sgnAbs n
    abs = fromIntegral . sAbs
-   signum 0    = 0
-   signum n
-      | sSgn n =  1
-      | True   = -1
+   -- signum      = (*. 1) . sgn  -- for just two values, {-1, 1} 
+   signum (S _ 0)       =  0
+   signum (S True  _)   =  1
+   signum (S False _)   = -1
    negate      = sNeg
-   (+)         = (+)
-   (*)         = (*)
+   (+) (S xs xv) (S ys yv) 
+      | xs == ys  = S xs  (xv + yv)
+      | xv >= yv  = S xs  (xv - yv)
+      | True      = S ys  (yv - xv)
+   (*) (S xs xv) (S ys yv) = S (xs == ys) (xv * yv)
 
 
 instance Show SInt where
@@ -174,7 +196,8 @@ instance Enum SInt where
    fromEnum (S s a)  = fromEnum a
    toEnum x          = S True (toEnum ax)
       where (sx, ax) = sgnAbs x
-   pred (S _ 0) = error "Predecessor of '0' or '0-', in NonPosi3.SInt. "
+   -- pred (S _ 0) = error "Predecessor of '0' or '0-', in NonPosi3.SInt. "
+   pred (S s 0) = S s 0    -- in order to be a safe function. 
    pred (S s a) = S s (a - 1)
    succ (S s a) = S s (a + 1)
 

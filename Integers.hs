@@ -23,7 +23,7 @@
 module Integers (
    quotMod, gcdInv, iquot, imod, (%), mInv, raiz, squareRoot, 
    parityRem, parity, lowTerm, remParity, 
-   log2, pow2, half, dup, 
+   log2, pow2, half, dup, third, triple, 
    genFermat, fermat
 ) where
 
@@ -48,8 +48,8 @@ quotMod :: (Signed a, Integral a) => a -> a -> (a, a)
    It should keep: 'n = q*d + r', minimizing 'abs r'. 
 -}
 quotMod divisor n 
-   | -(r - ad) <  r  = (sd +. q, r - ad)  -- r > 0
-   |   r + ad <= -r  = (sd -. q, r + ad)  -- r < 0, limit included
+   | -(r - ad) <  r  = (q +. sd, r - ad)  -- r > 0
+   |   r + ad <= -r  = (q -. sd, r + ad)  -- r < 0, limit included
    | True            = (q, r)             -- |d| - |r| >= |r|
    where
    (sd, ad) = sgnAbs divisor
@@ -69,8 +69,8 @@ infixl 6 %
 (%) = flip imod
 
 
-{- | Returns the g.c.d. of p and x, and also, if gcd = 1,
-   the second number will be the modular inverse: 
+{- | Returns the g.c.d. of p and x by extended Euclides algorithm, and also, 
+   if gcd = 1, the second number will be the modular inverse: 
    x^(-1) mod p 
 -}
 gcdInv :: (Signed a, Integral a) => a -> a -> (a, a)
@@ -98,6 +98,9 @@ mInv p x
    where 
    (d, i) = (gcdInv p) x
 
+-- Faster than extended Euclides. Only when x divides (p - 1), that is, 
+-- when x is the order of any subgroup (mod p)
+-- mInv p x = iquot x (1 - p) 
 
 
 ----
@@ -130,15 +133,18 @@ squareRoot :: Integer -> Integer
  
 squareRoot 0 = 0
 squareRoot 1 = 1
-
 squareRoot n =
-   let twopows = iterate (^!2) 2
-       (lowerRoot, lowerN) =
-          -- last $ takeWhile ((n>=) . snd) $ zip (1:twopows) twopows
-          last . takeWhile ((n>=) . snd) $ zip (1:twopows) twopows
+   let twopows = iterate (^! 2) 2
+      -- Fast way of finding the ceil and floor  power of 2
+       (lowerRoot, lowerN) = last . takeWhile ((n >=) . snd) 
+          $ zip (1 : twopows) twopows
+          
+       -- One recursion
        newtonStep x = quot (x + quot n x) 2
-       iters = iterate newtonStep (squareRoot (quot n lowerN) * lowerRoot)
-       isRoot r  =  r^!2 <= n && n < (r+1)^!2
+       iters = iterate newtonStep $ lowerRoot * squareRoot (quot n lowerN)
+       
+       isRoot r = r ^! 2 <= n 
+               && n < (r + 1) ^! 2
    in  head $ dropWhile (not . isRoot) iters
    
 -- squareRoot n = head $ dropWhile isnotRoot iters    
@@ -147,7 +153,7 @@ squareRoot n =
    -- isnotRoot r = abs r < r2 -- r < |n - r - r^2| -> |2r| < |n - r^2|
       -- where r2 = abs $ n - r * (1 + r) -- |r| < |r(r + 1) - n|
    -- -- isnotRoot = not . isRoot
-   -- -- isRoot r  =  r^!2 <= n && n < (r+1)^!2
+   -- -- isRoot r  =  r ^! 2 <= n && n < (r+1) ^! 2
 
    -- iters = iterate newtonStep init
       -- where
@@ -213,18 +219,17 @@ dup2x3 = zip (duplicates 2) (duplicates 3)
 
 ----
 
-log2 :: Integer -> (Bool, Int)
-{- | One less than ceil of logarithm base 2, and rest
-   (but it should be the closest power of two)
+log2 :: Integer -> Int
+{- | Logarithm base 2 (number of bits), and sign
    It counts the number of duplications of 1 to reach 'n'
 -}
 log2 0      = error "Logarithm of 0 in Integers.log2"
-log2 x      = (sx, n)
+log2 x      = n
    where 
-   (sx, ax) = sgnAbs x
+   ax = abs x
    n        = length dups
-   dups     = takeWhile (< ax) $ 1 : duplicates 3
-   -- dups'    = takeWhile (< ax) $ 1 : squares 2
+   -- dups'    = takeWhile (< ax) $ 1 : squares 2  -- lower power of two
+   dups     = takeWhile (< ax) $ 1 : duplicates 3  -- closest power of two
 
 
 -- | O(1), multiplication by a power of 2: x * 2^n, 
@@ -241,10 +246,14 @@ pow2 a
 dup :: Signed a => a -> a
 dup  = (*     2)  -- Double of an integer
 
-
 half :: (Signed a, Integral a) => a -> a
 half = (iquot 2)  -- Half of an integer, rounded down
--- half = (`Prelude.quot` 2)
+
+triple :: Signed a => a -> a
+triple  = (*     3)  -- Triple of an integer
+
+third :: (Signed a, Integral a) => a -> a
+third = (iquot 3)  -- Third of an integer, rounded down
 
 
 ---------------------------
