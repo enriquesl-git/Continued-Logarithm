@@ -10,10 +10,10 @@
 -- 
 -- Nonpositional binary (Binary) data type and its operations.
 -- 
--- It is used a type SInt for digit terms, such that negative terms are
+-- It is used a type Term for digit terms, such that negative terms are
 -- represented with the '-' sign following the value (exponent of 2). 
 --  
--- Then, the type Binary is defined as a list of SInt terms:
+-- Then, the type Binary is defined as a list of Term terms:
 -- An example is: 377 = NB [9, 7-, 3-, 0]
  
 -- It should be an instance of 'Integer' and 'Signed', so it should 
@@ -22,7 +22,7 @@
 -----------------------------------------------------------------------------
 
 module Binary (
-   SInt(..), Binary(..), PairNB, -- data types
+   Term(..), Binary(..), PairNB, -- data types
    half, dup, sgn, -- from imported modules
    i2terms, terms2i, oneTerm, pair2i, -- conversion
    neg, carry, add, sub, -- arithmetic & comparation
@@ -50,7 +50,7 @@ default ()
 
 {- | Binary will be an instance of:
    (Ord, Num, Integral, Signed, Num, Integral, Real, Foldable?) -}
-newtype Binary = NB [SInt] deriving (Eq, Show, Read)
+newtype Binary = NB [Term] deriving (Eq, Show, Read)
 
 -- type NB = Binary   -- just for brevity
 type PairNB = (Binary, Binary)
@@ -145,7 +145,7 @@ instance Real Binary where
 {- | From non-positional binary to Integer, admits negative terms,
    it also defines the recursive homographic transformation. 
    Used in Integral instance. -}
-terms2i :: [SInt] -> Integer
+terms2i :: [Term] -> Integer
 terms2i = foldr transform 0 where
    transform (S s a)
       = (+) $ (*. s) . (^ a) $ 2
@@ -157,7 +157,7 @@ terms2i = foldr transform 0 where
    x0 = 2^a0*sgn + x1; [a0,a1,...,an] == 2^a0 + 2^a1 + ... + 2^an
    Should be an 'unfold' or equivalent to it.
    Used in Num instance. -}
-i2terms :: Integer -> [SInt]  -- is: Integer Signed
+i2terms :: Integer -> [Term]  -- is: Integer Signed
 i2terms x = reverse $ i2terms' 0 x where 
    i2terms' _ 0 = []
    i2terms' a n
@@ -167,7 +167,7 @@ i2terms x = reverse $ i2terms' 0 x where
       | True      = i2terms' (1 + a) (half n) -- 1 + dup q
       where (q, r) = quotMod 4 n
 
-oneTerm :: Word -> Binary
+oneTerm :: Int -> Binary
 oneTerm x 
    | sgn x  = NB [S True x]
    | True   = error "Negative argument in Binary.oneTerm. "
@@ -179,7 +179,7 @@ oneTerm x
 
 {- | Addition, for both, positive and negative terms 
 -}
-add, sub :: [SInt] -> [SInt] -> [SInt]
+add, sub :: [Term] -> [Term] -> [Term]
 add [] ys = ys
 add xs (b : ys)
    | head xs <= b    = carry . (b :) . add xs $ ys
@@ -187,7 +187,7 @@ add xs ys            = add ys xs
 
 sub = add . neg
 
-neg :: [SInt] -> [SInt]
+neg :: [Term] -> [Term]
 neg = fmap sNeg
 
 {- | Carry for arithmetic operations, 
@@ -198,7 +198,7 @@ neg = fmap sNeg
    O(log n) because recursion is not all of the times, 
    so it will stop recurring in a length proportional to log n, as much.
 -}
-carry :: [SInt] -> [SInt]
+carry :: [Term] -> [Term]
 carry (a : b : xs)
    -- | a > succ b      = a : carry (b : xs)
    | negA == b       = carry xs
@@ -214,7 +214,7 @@ carry (a : b : xs)
 carry xs = xs
 
 {- | carryAll is the recursive application of carry. Not used -}
--- carryAll :: [SInt] -> [SInt]
+-- carryAll :: [Term] -> [Term]
 -- carryAll (x : xs) = carry $ x : carryAll xs
 -- carryAll _        = []
 
@@ -228,7 +228,7 @@ carry xs = xs
 -- it should be checked that n >= -v; otherwise result would be rounded, 
 -- (or fractional CLog should be defined).
 -- names: pw2, mulDup, manyDup, DupN, timesDup, dupDup, mul2pow, dupRep/repDup, shift
-pw2 :: Int -> [SInt] -> [SInt]
+pw2 :: Int -> [Term] -> [Term]
 pw2 n  = fmap (pw2term n)
    where
    pw2term n (S s v)
@@ -237,7 +237,7 @@ pw2 n  = fmap (pw2term n)
       where vn = fromIntegral v + n    -- conversion from natural
 
 -- | quarter: like dividing by 4; 
-quarter :: [SInt] -> [SInt]
+quarter :: [Term] -> [Term]
 quarter x      = pw2 (-2) x
 -- | Duplicate: multiply by 2, faster than add xs xs; 
 -- half: like dividing by 2; 
@@ -253,7 +253,7 @@ npHlf (NB x)   = NB $ pw2 (-1) x
 
 {- | Square, O(n^2), faster than @mul xs xs@ -}
 -- sqr :: Binary -> Binary
-sqr :: [SInt] -> [SInt]
+sqr :: [Term] -> [Term]
 -- sqr (S s x : xs) = carry
    -- . (S True (dup x) :)
    -- . mul xs 
@@ -268,7 +268,7 @@ npSqr (NB x) = NB (sqr x)
 -- npSqr (NB [S _ x]) = oneTerm (dup x) -- single term square
 
 -- mul, mulF  :: Binary -> Binary -> Binary
-mul, mulE, mulF  :: [SInt] -> [SInt] -> [SInt]
+mul, mulE, mulF  :: [Term] -> [Term] -> [Term]
 
 -- product by a one term element, equivalent to pw2
 -- mul [S sa aa] [S sb ab] = [S (sa == sb) (aa + ab)]
@@ -308,7 +308,7 @@ mulF xs ys = quarter $ sub sqSub sqSum   -- 1/4(A^2 - B^2)
 ---------------------------------------------------------------------------
 
 
-divStep :: Binary -> Binary  -> (SInt, Binary)
+divStep :: Binary -> Binary  -> (Term, Binary)
 {- | Single division step. (Not used yet)
    Returns  SINGLE TERM  quotient which minimizes absolute rest, 
    and the new rest; keeps 'r + q*d' = constant, where: 

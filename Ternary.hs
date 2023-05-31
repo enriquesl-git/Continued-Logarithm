@@ -10,10 +10,10 @@
 -- 
 -- Nonpositional ternary ('Ternary') data type and its operations.
 -- 
--- It is first defined a type SInt such that negative terms are
+-- It is first defined a type Term such that negative terms are
 -- represented with the '-' sign following the value (exponent of 3). 
 --  
--- Then, the type Ternary is defined as a list of SInt:
+-- Then, the type Ternary is defined as a list of Term:
 -- An example is: 377 = NT [6,5-,4-,3-,0-]
  
 -- It should be an instance of 'Integral' and 'Signed', so it should 
@@ -22,7 +22,7 @@
 -----------------------------------------------------------------------------
 
 module Ternary (
-   SInt(..), Ternary(..), PairNT, -- data types
+   Term(..), Ternary(..), PairNT, -- data types
    half, dup, sgn, -- from imported modules
    i2terms, terms2i, oneTerm, pair2i, -- conversion
    neg, add, sub, -- arithmetic & comparation
@@ -51,7 +51,7 @@ default ()
 
 {- | Ternary will be an instance of:
    (Ord, Num, Integral, Signed, Num, Integral, Real, Foldable?) -}
-newtype Ternary = NT [SInt] deriving (Eq, Show, Read)
+newtype Ternary = NT [Term] deriving (Eq, Show, Read)
 
 -- type NT = Ternary   -- just for brevity
 type PairNT = (Ternary, Ternary)
@@ -146,7 +146,7 @@ instance Real Ternary where
 {- | From non-positional ternary to Integer, admits negative terms,
    it also defines the recursive homographic transformation. 
    Used in Integral instance. -}
-terms2i :: [SInt] -> Integer
+terms2i :: [Term] -> Integer
 terms2i = foldr transform 0 where 
    transform (S s a) 
       = (+) $ (*. s) . (^ a) $ 3
@@ -161,7 +161,7 @@ terms2i = foldr transform 0 where
      x0 = 3^a0*sgn + x1; [a0,a1,...,an] == 3^a0 + 3^a1 + ... + 3^an
    Should be an 'unfold' or equivalent to it.
    Used in Num instance. -}
-i2terms :: Integer -> [SInt]  -- is: Integer Signed
+i2terms :: Integer -> [Term]  -- is: Integer Signed
 i2terms = i2terms' 0 where -- reverse $
    i2terms' _ 0 = []
    i2terms' a n
@@ -169,7 +169,7 @@ i2terms = i2terms' 0 where -- reverse $
       | True      = S (sgn r) a : i2terms' (1 + a) q
       where (q, r) = quotMod 3 n
 
-oneTerm :: Word -> Ternary
+oneTerm :: Int -> Ternary
 oneTerm x
    | sgn x  = NT [S True x]
    | True   = error "Negative argument in Ternary.oneTerm. "
@@ -181,7 +181,7 @@ oneTerm x
 
 {- | Addition, for both, positive and negative terms 
 -}
-add, sub :: [SInt] -> [SInt] -> [SInt]
+add, sub :: [Term] -> [Term] -> [Term]
 add xs [] = xs
 add [] xs = xs
 add [y] (x:xs)
@@ -193,7 +193,7 @@ add (y:ys) xs        = add [y] $ add ys xs
 
 sub = add . neg
 
-neg :: [SInt] -> [SInt]
+neg :: [Term] -> [Term]
 neg = fmap sNeg
 
 {- | Carry for arithmetic operations, 
@@ -205,7 +205,7 @@ neg = fmap sNeg
    so it will stop recurring in a length proportional to log n, as much.
 -}
 {-
-carry :: [SInt] -> [SInt]
+carry :: [Term] -> [Term]
 carry (a : b : xs)
    -- | a > succ b      = a : carry (b : xs)
    | negA == b       = carry xs
@@ -222,7 +222,7 @@ carry xs = xs
 -}
 
 {- | carryAll is the recursive application of carry. Not used -}
--- carryAll :: [SInt] -> [SInt]
+-- carryAll :: [Term] -> [Term]
 -- carryAll (x : xs) = carry $ x : carryAll xs
 -- carryAll _        = []
 
@@ -230,19 +230,6 @@ carry xs = xs
 -----------------------------------------------------------------------
 -- * Base operations: bit-shift, triplicate, third,
 ---------------------------------------------------------------------------
-
--- | Multiplication by power of 3, MULtiple TRIPLication, bitwise left shift.
--- Power can be negative, which will give division, but
--- it should be checked that n >= -v; otherwise result would be rounded, 
--- (or fractional CLog should be defined).
-pw3 :: Int -> [SInt] -> [SInt]
-pw3  = fmap . pw3term
-   where
-   pw3term n (S s v)
-      | sgn vn    = S s $ fromIntegral vn -- conversion to natural
-      where vn    = fromIntegral v + n    -- conversion from natural
-   pw3term _ _    = error "Third of non-multiple of 3, in Ternary.pw3. "
-
 
 -- | Triplicate: multiply by 3, faster than add; 
 -- third: like dividing by 3; 
@@ -254,7 +241,7 @@ ntThird (NT x)   = NT $ pw3 (-1) x
 ntDup x    = x + x
 ntQuad x   = x + ntTripl x
 
--- ntHalf, ntQuarter :: [SInt] -> [SInt]
+-- ntHalf, ntQuarter :: [Term] -> [Term]
 
 -- ntHalf (NT n) = NT . h $ reverse n
    where
@@ -284,45 +271,36 @@ h [a, b]
 --       | a == b && a == c && a == div= a : xs
 
 
+-- | Multiplication by power of 3, MULtiple TRIPLication, bitwise left shift.
+-- Power can be negative, which will give division, but
+-- it should be checked that n >= -v; otherwise result would be rounded, 
+-- (or fractional CLog should be defined).
+pw3 :: Int -> [Term] -> [Term]
+pw3 = fmap . incr
+-- pw3  = fmap . pw3term
+   -- where
+   -- pw3term n (S s v)
+      -- | sgn vn    = S s $ vn -- conversion to natural
+      -- where vn    = v + n    -- conversion from natural
+   -- pw3term _ _    = error "Third of non-multiple of 3, in Ternary.pw3. "
+
+
 -----------------------------------------------------------------------
 -- * Geometric direct operations: multiplication, square
 ---------------------------------------------------------------------------
 
-{- | Square, O(n^2), faster than @mul xs xs@ -}
-sqr :: [SInt] -> [SInt]
-
--- | recursive version:  x^2 + (2*x*xs + xs^2)
--- supposedly faster, as the term x^2 is calculated appart in a simpler way
-sqr (S s x : xs)
-   = (S True (dup x) :) -- x^2 +
-   . add (sqr xs)       -- xs^2 +
-   . mul xs             -- xs *
-   $ [S (not s) x, S s (x + 1)]  -- (x + x), in ternary
-
--- | non-recursive version:  x^2 + (2*x + xs)*xs
--- sqr (S s x : xs) =
---    (S True (dup x) :)
---    . mul xs
---    $ S (not s) x: S s (x + 1) : xs
-
-sqr _ = []
-
--- npSqr :: Ternary -> Ternary
-npSqr (NT x) = NT (sqr x)
--- npSqr (NT [S _ x]) = oneSInt (dup x) -- single term square
-
 -- mul, mulF  :: Ternary -> Ternary -> Ternary
-mul, mulE  :: [SInt] -> [SInt] -> [SInt]
+mul, mulE  :: [Term] -> [Term] -> [Term]
 
 -- product by a one term element, equivalent to pw3
 -- mul [S sa aa] [S sb ab] = [S (sa == sb) (aa + ab)]
 -- mul [S sx ax] (S s v : ys) = S (sx == s) (ax + v) : mul [S sx ax] ys
-mul [S True ax] ys = pw3 (fromIntegral ax) ys
-mul [S _    ax] ys = pw3 (fromIntegral ax) $ neg ys
-mul xs [y] = mul [y] xs
+mul [S True ax] = pw3 ax
+mul [S _    ax] = pw3 ax . neg 
+-- mul xs [y] = mul [y] xs
 
 -- general product, several methods can be chosen
-mul x y = mulE x y
+mul x = mulE x
 -- mul x y = mulS x y
 -- mul x y = mulF x y
 
@@ -349,13 +327,37 @@ mulS _ _ = []
 --          sqSum = sqr $ add xs ys   -- squared sum:        (ys + xs)^2
 
 
+{- | Square, O(n^2), faster than @mul xs xs@ -}
+sqr :: [Term] -> [Term]
+
+-- | recursive version:  x^2 + (2*x*xs + xs^2)
+-- supposedly faster, as the term x^2 is calculated appart in a simpler way
+sqr (S s x : xs)
+   = (S True (dup x) :) -- x^2 +
+   . add (sqr xs)       -- xs^2 +
+   . mul xs             -- xs *
+   $ [S (not s) x, S s (x + 1)]  -- (x + x), in ternary
+
+-- | non-recursive version:  x^2 + (2*x + xs)*xs
+-- sqr (S s x : xs) =
+--    (S True (dup x) :)
+--    . mul xs
+--    $ S (not s) x: S s (x + 1) : xs
+
+sqr _ = []
+
+-- npSqr :: Ternary -> Ternary
+npSqr (NT x) = NT (sqr x)
+-- npSqr (NT [S _ x]) = oneSInt (dup x) -- single term square
+
+
 ---------------------------------------------------------------------------
 {- = Inverse geometric operations, with integer rest: 
    division, square root, gcd, -}
 ---------------------------------------------------------------------------
 
 
-divStep :: Ternary -> Ternary  -> (SInt, Ternary)
+divStep :: Ternary -> Ternary  -> (Term, Ternary)
 {- | Single division step. (Not used yet)
    Returns  SINGLE TERM  quotient which minimizes absolute rest, 
    and the new rest; keeps 'r + q*d' = constant, where: 

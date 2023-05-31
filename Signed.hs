@@ -41,7 +41,6 @@ class (Num t, Ord t, Read t) => Signed t where
    (*.), (/.), (+.), (-.) ::        t -> Bool -> t
    -- (+s), (-s) :: Signed c =>        c -> t -> t
    chSgn :: Signed c =>             c -> t -> t
-   incr, decr ::                    t -> t -> t
 
 
    -- Base function 'sgn', gives False for negatives, True otherwise
@@ -73,16 +72,9 @@ class (Num t, Ord t, Read t) => Signed t where
    chSgn y     = (*. sgn y)
    -- chSgn     = (*.) $ sgn
    
-   -- increments/decrements the absolute vale,
-   -- that is, the sign of 'a' modifies 'n', or 'n' is scaled by 'sgn a' and summed
-   -- like (+.) with the sign of 'a'
-   incr n a    = a + n *. sgn a  -- incr n (S sa va) = S sa (n + va)
-   decr n a    = a - n *. sgn a
-   -- succ a      = sgn a +. a
-   -- pred a      = sgn a -. a
-
    -- setSgn y  = chSgn y . abs
    -- setSgn y x  = sgn y *. abs x 
+   
 
 
 instance Signed Integer
@@ -106,26 +98,57 @@ instance Num Bool where
 
 
 {----------------------------------------------------------------------------
-  Definition of a type class for short integers (word size): SInt
-  With this definition, zero can be positive or negative, 
-  as every other number
+  Definition of a type class for short integers (word size): Term
+  
+  It is thought to store the single elements of non-positional numerical 
+  representations (signum and exponent), or continued fractions and logarithms.
+  
+  With this definition, zero can be positive or negative, as every other number. 
+  Programmer can define if +0 == -0, or +0 /= -0
 
 ----------------------------------------------------------------------------}
 
 
-data SInt = S { 
-   sSgn :: Bool,   -- Signum of SInt
-   sAbs :: Word    -- Absolut value (unsigned integer) of SInt
+data Term = S { 
+   sSgn :: Bool,   -- Signum of Term
+   sAbs :: Int    -- Absolut value (unsigned integer) of Term
 } deriving (Eq)
    
-sNeg :: SInt -> SInt
+sNeg :: Term -> Term
 -- Opposite of term
 sNeg (S s a) = S (not s) a
+
+incr, decr ::  Int -> Term -> Term
+-- increments/decrements the absolute vale,
+-- that is, the sign of 'a' modifies 'n', or 'n' is scaled by 'sgn a' and summed
+-- like (+.) with the sign of 'a'
+-- incr n a    = a + n *. sgn a
+incr n (S sa va) = S sa (va + n)
+decr n      = incr (-n)
 
 
 ----
 
-instance Signed SInt where
+instance Enum Term where
+
+   fromEnum (S s a)  = fromEnum a
+   toEnum x          = S True (toEnum ax)
+      where (sx, ax) = sgnAbs x
+   -- pred (S _ 0) = error "Predecessor of '0' or '0-', in Ternary.Term. "
+   pred (S s 0) = S s 0    -- in order to be a safe function. 
+   pred (S s a) = S s (a - 1)
+   succ (S s a) = S s (a + 1)
+
+
+{- Term as an instance of (Num, Ord, Signed)
+-}
+
+instance Ord Term where
+   -- compare absolutes!
+   compare (S _ x1) (S _ x2) = compare x1 x2
+
+
+instance Signed Term where
    
    (+.) (S s a) True    = S s (a + 1)
    (+.) (S s a) False   = S s (a - 1)
@@ -133,7 +156,7 @@ instance Signed SInt where
    abs (S _ a)    = S True a
    sgnAbs (S s a) = (s, S True a)
 
-instance Num SInt where
+instance Num Term where
 
    fromInteger n  = S s (fromIntegral a)
       where (s, a) = sgnAbs n
@@ -150,13 +173,13 @@ instance Num SInt where
    (*) (S xs xv) (S ys yv) = S (xs == ys) (xv * yv)
 
 
-instance Show SInt where
+instance Show Term where
 
    show (S True a) = ' ' : show a
    show (S _    a) = ' ' : show a ++ "-"
 
 
-instance Read SInt where
+instance Read Term where
 
    readsPrec _ s = 
       let rd = reads s in
@@ -183,26 +206,6 @@ instance Read SInt where
          -- _     -> (S True a , rest)
 
 
-{- SInt as an instance of (Num, Ord, Signed)
--}
-
-instance Ord SInt where
-   -- compare absolutes!
-   compare (S _ x1) (S _ x2) = compare x1 x2
-
-
-instance Enum SInt where
-
-   fromEnum (S s a)  = fromEnum a
-   toEnum x          = S True (toEnum ax)
-      where (sx, ax) = sgnAbs x
-   -- pred (S _ 0) = error "Predecessor of '0' or '0-', in NonPosi3.SInt. "
-   pred (S s 0) = S s 0    -- in order to be a safe function. 
-   pred (S s a) = S s (a - 1)
-   succ (S s a) = S s (a + 1)
-
-
-
 -- class BoolSigned t where
    -- {-# MINIMAL signed #-}
    
@@ -210,5 +213,5 @@ instance Enum SInt where
    -- signed (a, b) = if b then a else -a
 
 -- instance BoolSigned SInteger
--- instance BoolSigned SInt
+-- instance BoolSigned Term
 
