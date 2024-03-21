@@ -10,12 +10,19 @@
 -- 
 -- Nonpositional ternary ('Ternary') data type and its operations.
 -- 
--- It is first defined a type Term such that negative terms are
--- represented with the '-' sign following the value (exponent of 3). 
+-- It is first defined a type Term, and then an ordered list of them 
+-- starting by the greatest one, Terms = [Term], such that negative terms 
+-- are represented with the '-' sign behind the value (exponent of 3). 
+-- An example is: 
+--   377 = [6, 5-, 4-, 3-, 0-] 
+--       = - 3^0 - 3^3 - 3^4 - 3^5 + 3^6
+--       = 3^6 - 3^5 - 3^4 - 3^3 - 3^0
 --  
--- Then, the type Ternary is defined as a list of Term:
--- An example is: 377 = NT [6,5-,4-,3-,0-]
- 
+-- Then, the type Ternary is defined as a reversed list of the cummulative 
+-- Terms, such that an element value is the sum of them up to it:
+--   377 = NT [0-,3-,1- 1- 1] 
+--       = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(1 + 3^1))))
+
 -- It should be an instance of 'Integral' and 'Signed', so it should 
 -- implementmet methods for: Ord, Num, Signed, Integral 
 -- 
@@ -24,9 +31,10 @@
 module Ternary (
    Term(..), Ternary(..), PairNT, -- data types
    half, dup, sgn, -- from imported modules
-   i2terms, terms2i, oneTerm, pair2i, -- conversion
-   neg, add, sub, -- arithmetic & comparation
-   pw3, ntTripl, ntThird, mul, divStep, sqr, npSqr,   -- quarter, geometric
+   toTerms, fromTerms, oneTerm, pair2i, -- conversion
+   cmp, sgnTerms, absTerms, compareAbs, minAbs,  -- comparation
+   neg, add, sub, -- arithmetic 
+   pw3, ntTripl, ntThird, mul, sqr, npSqr,   -- quarter, geometric
    -- sqrtStep, sqrtRem, sqrtMod,  -- inverse
 ) where
 
@@ -66,66 +74,17 @@ pair2i (x, y) = (toInteger x, toInteger y)
 
 instance Ord Ternary where
 
-   (<=) (NT (S sx ax : xs)) (NT (S sy ay : ys))
-      | sx /= sy  = sy
-      | ax /= ay  = sy && ax < ay
-      | True      = NT xs <= NT ys
-   (<=) (NT (S sx _ : _)) _  = not sx
-   (<=) _ y  = sgn y
-
-
-instance Enum Ternary where
-
-   fromEnum          = fromEnum . toInteger
-   toEnum            = fromInteger . toEnum -- not right
-
-
-instance Signed Ternary where
-
-   (+.) a s          = a + NT [S s 0] -- a +- 1
-   sgn (NT [])       = True
-   sgn (NT x)        = sSgn $ last x
-
-
-instance Num Ternary where
-
-   fromInteger       = NT . i2terms
-   abs               = snd . sgnAbs
-   signum 0          =  0
-   signum n | sgn n  =  1
-   signum _          = -1
-   negate (NT x)     = NT (neg x)
-   (+) (NT x) (NT y) = NT (add x y)
-   (*) (NT x) (NT y) = NT (mul x y)
-
-
-instance Integral Ternary where
-
-   toInteger (NT t) = terms2i t
-
-   {- Euclidean recursive division, minimum absolute rest -}
-   divMod _ 0  = error "Division by 0, in Ternary.divMod. "
-   divMod rs ds
-      | end    = (0, rNext) 
-      | True   = (qNew, rNew) 
-      where
-      end   = sAbs qNext == 0   -- rs < ds  ==>  qNew == q
-      qNew  = NT [qNext] + q    -- accumulates q, without passing an accumulator
-      (q, rNew)      = divMod rNext ds
-      (qNext, rNext) = divStep rs ds
-
-   {- | Returns quotient with positive rest always -}
-   quotRem n d
-      | sgn r  = (q    , r)
-      | sgn d  = (q - 1, r + d)
-      | True   = (q + 1, r - d)
-      where
-      (q, r) = divMod n d
-
-
-instance Real Ternary where
-
-   toRational = toRational . toInteger
+   -- Needed to be processed from greater term down to the smaller one
+   -- (<=) (NT []) ys  = sgn ys
+   -- (<=) (NT xs) (NT ys)
+      -- | sx /= sy  = sy
+      -- | ax /= ay  = sy && ax < ay
+      -- | True      = NT (init xs) <= NT (init ys)
+      -- where
+      -- S sx ax = last xs
+      -- S sy ay = last ys
+      
+   compare x y = cmp (toTerms x) (toTerms y)
 
 
 -- instance Foldable Ternary where
@@ -135,39 +94,163 @@ instance Real Ternary where
    -- foldr f z (NT x) = NT (foldr f z x)
 
 
----------------------------------------------------------------------------
+instance Enum Ternary where
+
+   fromEnum          = fromEnum . toInteger
+   toEnum            = fromInteger . toEnum -- not right
+
+
+instance Real Ternary where
+
+   toRational = toRational . toInteger
+
+
+instance Signed Ternary where
+
+   (+.) a s          = a + NT [S s 0] -- a +- 1
+   sgn (NT [])       = True
+   sgn (NT x)        = sSgn $ last x
+
 {- = 
-   Conversion from and to Decimal base notation. 
+   Conversion from and to Decimal base notation: 
+      fromInteger, toInteger
    Continued Logarithm == continued product, by Euler transform
    Here it is really cLog(x + 1) 
 -}
----------------------------------------------------------------------------
 
-{- | From non-positional ternary to Integer, admits negative terms,
+instance Num Ternary where
+
+   {- | Gives in each step the closest power of 3. 
+      That way, truncation will give the best approximation. 
+      
+      If odd subtract 1 and write 0, if even divide by 3 and count. 
+      Write times counted. 
+        x0 = 3^a0*sgn + x1; [a0,a1,...,an] == 3^a0 + 3^a1 + ... + 3^an
+      Should be an 'unfold' or equivalent to it.
+      Used in Num instance. -}
+      
+   -- fromInteger       = fromTerms . i2terms
+   -- i2terms :: Integer -> [Term]  -- is: Integer Signed
+   -- i2terms = fromI 0 where -- reverse $
+   fromInteger = NT . fromI 0  -- reverse $
+      where
+      fromI _ 0 = []
+      fromI a n
+         | r == 0    =               fromI (1 + a) q
+         -- | True      = S (sgn r) a : fromI (1 + a) q
+         | True      = S (sgn r) a : fromI (1 ) q -- Differential
+         where (q, r) = quotMod 3 n -- minimizes absolute rest
+
+   abs               = snd . sgnAbs
+   signum 0          =  0
+   signum n | sgn n  =  1
+   signum _          = -1
+   negate (NT x)     = NT (neg x)
+   (+) x y = fromTerms $ add (toTerms x) (toTerms y)
+   -- (*) x y = fromTerms $ mul (toTerms x) (toTerms y)
+   (*) (NT x) (NT y) = fromTerms $ mul x y
+
+
+
+instance Integral Ternary where
+
+   
+   {- | From non-positional ternary to Integer, admits negative terms,
    it also defines the recursive homographic transformation. 
    Used in Integral instance. -}
-terms2i :: [Term] -> Integer
-terms2i = foldr transform 0 where 
-   transform (S s a) 
-      = (+) $ (*. s) . (^ a) $ 3
-      -- = (+) $ (*. s) . (3 ^) $ a
-      -- = (+) $ (*. s) $ 3 ^ a
+   -- toInteger = terms2i . toTerms
+   -- terms2i :: [Term] -> Integer
+   -- terms2i = foldr transform 0 where 
+   toInteger (NT t) = foldr transform 0 t where 
+      transform (S s a) 
+         -- = (+) $ (*. s) . (^ a) $ 3
+         -- = (+) $ (*. s) . (3 ^) $ a
+         -- = (+) $ (*. s) $ 3 ^ a
+         = (* 3 ^ a) . (+. s)    -- Differential
+   -- terms2i (S s a : xs) = ((terms2i xs +. s) * 3 ^ a)
+   -- terms2i _      = 0
 
-{- | Gives in each step the closest power of 3. 
-   That way, truncation will give the best approximation. 
+
+   {- | Returns quotient with positive rest always -}
+   -- divMod = quotRem
+   -- quotRem n d
+      -- | sgn r  = (q    , r)
+      -- | sgn d  = (q - 1, r + d)
+      -- | True   = (q + 1, r - d)
+      -- where
+      -- (q, r) = divMod n d
+
+
+   {- Euclidean recursive division, minimum absolute rest.
+      Division is a recursive subtraction.  -}
+   quotRem _ 0  = error "Division by 0, in Ternary.quotRem. "
+   quotRem rs ds 
+      | dupR >  d    = (qNew + 1, rNew - d)
+      | dupR <= - d  = (qNew - 1, rNew + d)
+      | dupR <= d    = (qNew, rNew)
+      
+      where
+      -- use the divisor always positive
+      (d, r)   | S.sgn ds  = (ds, rs)
+               | True      = (- ds, - rs)
+      (qTerm, rTerm) = divStep (toTerms d) [] (toTerms r)
+      (qNew, rNew) = (fromTerms qTerm, fromTerms rTerm)
+      dupR = rNew + rNew
+
+
+
+-- divStep :: Ternary -> Ternary -> (Ternary, Ternary)
+divStep :: [Term] -> [Term] -> [Term] -> ([Term], [Term])
+{- | Returns quotient which gives rest less than divisor. 
+   On each single division step calculates SINGLE TERM 
+   quotient which minimizes absolute rest, and the new rest; 
    
-   If odd subtract 1 and write 0, if even divide by 3 and count. 
-   Write times counted. 
-     x0 = 3^a0*sgn + x1; [a0,a1,...,an] == 3^a0 + 3^a1 + ... + 3^an
-   Should be an 'unfold' or equivalent to it.
-   Used in Num instance. -}
-i2terms :: Integer -> [Term]  -- is: Integer Signed
-i2terms = i2terms' 0 where -- reverse $
-   i2terms' _ 0 = []
-   i2terms' a n
-      | r == 0    = i2terms' (1 + a) q
-      | True      = S (sgn r) a : i2terms' (1 + a) q
-      where (q, r) = quotMod 3 n
+   keeps '|d*q| + r' = constant, where: 
+   d = divisor; q = quotient; r = rest or module. -}
+divStep _ q [] = (q, [])
+divStep d q r
+   | ar < ad   = (q, r)
+   -- | dupr >      S.abs d   = (sub rNew d, [succ qDif])
+   -- | dupr < neg (S.abs d)  = (add rNew d, [pred qDif])
+   | True      = divStep d qNew rNew   
+   -- | True      =  (qNew, rNew)   
+   where
+   -- dupr = add rNew rNew
+   S sd ad = head d   -- divisor greatest term
+   S sr ar = head r   -- rest greatest term
+   
+   qDif = [S (sr == sd) (ar - ad)] -- oneTerm (ar - ad)
+   rDif = mul d qDif
+   qNew = add qDif q
+   rNew = sub rDif r    -- rNew = r - d * q
+   
+
+
+---------------------------------------------------------------------------
+{- = 
+   Conversion from and to 'Terms' (list of 'Term': [Term]).
+   'Terms' are greatest first, and accumulated, 
+      21 = [ 3, 2-, 1] = 3^3 - 3^2 + 3
+   'Ternary' is smallest first, and differential.
+      21 = NT [ 1, 1-, 1] = ((( 1 )*3 - 1 )*3 + 1 )*3
+-}
+---------------------------------------------------------------------------
+
+-- to Terms from Ternary
+-- cumulate, greatest first
+toTerms :: Ternary -> [Term]
+toTerms (NT t) = reverse $ zipWith (S) s a where
+   s = fmap sSgn t
+   a = scanl1 (+) . fmap sAbs $ t
+
+-- from Terms to Ternary
+-- uncumulate, differentiate, smallest first
+fromTerms :: [Term] -> Ternary
+fromTerms t = NT $ zipWith S s d where
+   rt = reverse t
+   s = fmap sSgn rt
+   a = fmap sAbs rt
+   d = zipWith (-) a (0 : a)
 
 oneTerm :: Int -> Ternary
 oneTerm x
@@ -176,20 +259,63 @@ oneTerm x
 
 ---------------------------------------------------------------------------
 {- = Arithmetic operations: 
-   addition, substraction, opposite, absolute, (un)carry, successor, -}
+   compare, addition, substraction, opposite, absolute, (un)carry, successor, -}
 ---------------------------------------------------------------------------
+
+cmp :: [Term] -> [Term] -> Ordering 
+cmp (x : xs) (y : ys)
+      | x < y  = LT 
+      | x > y  = GT
+      | True   = cmp xs ys      
+cmp (x : _) [] = if sSgn x then GT else LT
+cmp [] (y : _) = if sSgn y then LT else GT
+cmp [] []    = EQ
+
+sgnTerms :: [Term] -> Bool
+sgnTerms [] = True
+sgnTerms x = sSgn $ head x
+
+absTerms :: [Term] -> [Term]
+absTerms [] = []
+absTerms x = if sgnTerms x then x else neg x 
+
+compareAbs :: [Term] -> [Term] -> Ordering 
+compareAbs x y = cmp (absTerms x) (absTerms y)
+
+{- | Minimum of the absolute values, 
+   must be used for every rest. -}
+minAbs :: [Term] -> [Term] -> [Term] 
+minAbs x y
+   = case compareAbs x y of
+   LT -> x
+   GT -> y
+   EQ -> x  -- being equal abs, the first is chosen 
+
 
 {- | Addition, for both, positive and negative terms 
 -}
 add, sub :: [Term] -> [Term] -> [Term]
+-- Addition when notation is smallest term first
+-- add [y] (x:xs)
+   -- | x == sNeg y     =                       xs
+   -- | x == y          = sNeg y : add [succ y] xs -- carry & recursion
+   -- | sAbs x > sAbs y =      y : x :          xs
+   -- | True            =      x : add [y]      xs -- recursion
+-- add xs [] = xs
+-- add [] xs = xs
+-- add (y:ys) xs        = add [y] $ add ys xs
+
+-- Addition when notation is greatest term first
+add [y] (x:xs)
+   | x == sNeg y     =                       xs
+   | x == y          = succ y : sNeg x :     xs -- carry
+   | sAbs x < sAbs y =      y : x :          xs
+   | True            = add [x] $ add [y]     xs -- recursion
 add xs [] = xs
 add [] xs = xs
-add [y] (x:xs)
-   | x == sNeg y     = xs
-   | x == y          = sNeg y : add [succ y] xs    -- carry
-   | sAbs x < sAbs y = x : add [y] xs
-   | True            = y : x : xs
-add (y:ys) xs        = add [y] $ add ys xs
+
+add (y:ys) xs        = add [y] $ add xs ys
+
 
 sub = add . neg
 
@@ -244,17 +370,17 @@ ntQuad x   = x + ntTripl x
 -- ntHalf, ntQuarter :: [Term] -> [Term]
 
 -- ntHalf (NT n) = NT . h $ reverse n
-   where
-h [a, b]
-   | a == 0    = [] -- a : b : xs
-   | sgn a /= sgn b    = reverse [b .. pred a] 
-   -- | True = a : fmap negate $ reverse [b .. pred a] 
+   -- where
+   -- h [a, b]
+      -- | a == 0    = [] -- a : b : xs
+      -- | sgn a /= sgn b    = reverse [b .. pred a] 
+      -- | True = a : fmap negate $ reverse [b .. pred a] 
 
-   -- | True      = add [a1] $ h (a1 : b : xs)
-   -- where [a1] = pw3 (-1) [a]
--- h [0] = []
--- h [a] = pw3 (-1) [a]
--- h [] = []
+      -- -- | True      = add [a1] $ h (a1 : b : xs)
+      -- where [a1] = pw3 (-1) [a]
+   -- h [0] = []
+   -- h [a] = pw3 (-1) [a]
+   -- h [] = []
 
 -- ntQuarter = ntHalf . ntHalf
 
@@ -292,7 +418,7 @@ pw3 = fmap . incr
 -- mul, mulF  :: Ternary -> Ternary -> Ternary
 mul, mulE  :: [Term] -> [Term] -> [Term]
 
--- product by a one term element, equivalent to pw3
+-- | Product by a one term element, equivalent to pw3
 -- mul [S sa aa] [S sb ab] = [S (sa == sb) (aa + ab)]
 -- mul [S sx ax] (S s v : ys) = S (sx == s) (ax + v) : mul [S sx ax] ys
 mul [S True ax] = pw3 ax
@@ -306,13 +432,13 @@ mul x = mulE x
 
 {- | Multiplication
    Egyptian method, O(n^2) -}
-mulE xs (S sb ab : ys) = add (mul xs [S sb ab]) (mulE xs ys)
+mulE xs (S sb ab : ys) = add (mul [S sb ab] xs) (mulE xs ys)
 mulE _ _  = []
 
 {- | Straightforward multiplication, O(n^2) -}
 mulS (S sa aa : xs) (S sb ab : ys) = 
    (S (sa == sb) (aa + ab) :) 
-   . add (mul xs [S sb ab])
+   . add (mul [S sb ab] xs)
    . add (mul [S sa aa] ys)
    $ mulS xs ys
 mulS _ _ = []
@@ -333,7 +459,7 @@ sqr :: [Term] -> [Term]
 -- | recursive version:  x^2 + (2*x*xs + xs^2)
 -- supposedly faster, as the term x^2 is calculated appart in a simpler way
 sqr (S s x : xs)
-   = (S True (dup x) :) -- x^2 +
+   = (S True (x + x) :) -- x^2 +
    . add (sqr xs)       -- xs^2 +
    . mul xs             -- xs *
    $ [S (not s) x, S s (x + 1)]  -- (x + x), in ternary
@@ -357,40 +483,8 @@ npSqr (NT x) = NT (sqr x)
 ---------------------------------------------------------------------------
 
 
-divStep :: Ternary -> Ternary  -> (Term, Ternary)
-{- | Single division step. (Not used yet)
-   Returns  SINGLE TERM  quotient which minimizes absolute rest, 
-   and the new rest; keeps 'r + q*d' = constant, where: 
-   d = divisor; q = quotient; r = rest or module. -}
-divStep _ 0 = error "Divided by 0 in Ternary.divStep. "
-divStep 0 _ = (S True 0, 0)
-divStep (NT r) (NT d) = minimumBy comp candidates
-   where
-   -- positive rNew, reverse for optimization of steps 
-   candidates  = reverse $ (S True 0, NT r) : fmap qrPair digits
-      where
-      (S sr ar, S sd ad)  = (last r, last d)
-      digits   = [0 .. 1 + ar - ad]
-      
-      qrPair q = (qNew, NT rNew)
-         where 
-         qNew  = S (sr == sd) q
-         rDif  = mul [qNew] d
-         rNew  = sub rDif r
-   
-   comp (_, ra) (_, rb)
-      | res == EQ && sgn rb   = GT  -- in order to prioritize positive rest
-      | True                  = res
-      where 
-      res = compare (S.abs ra) (S.abs rb)
-      
-
 -- divStep (NT r) (NT d) =
 --    where
 --    (r, d) = ()
 --
 
-
-
----------------------------------------------------------------------------
-   

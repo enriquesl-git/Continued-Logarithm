@@ -21,7 +21,7 @@
 
 
 module Integers (
-   quotMod, gcdInv, iquot, imod, (%), mInv, raiz, squareRoot, 
+   quotMod, iquot, imod, (%), gcdInv, mInv, raiz, squareRoot, 
    parityRem, parity, lowTerm, remParity, 
    log2, pow2, half, dup, third, triple, 
    genFermat, fermat
@@ -34,7 +34,7 @@ import Prelude hiding (abs, signum, mod, div, ($), ($!), (.))
 infixl 0 $, $!   -- must be left associative in order to concatenate
 ($), ($!) :: (a -> b) -> a -> b
 ($) = id
-f $! x = x `seq` f x  -- ((seq x) . f) x; fmap ($ x) [seq, f]
+f $! x = x `seq` f x  -- (seq x . f) x; fmap ($ x) [seq, f]
 
 infixl 0 .
 (.) :: (b -> c) -> (a -> b) -> a -> c
@@ -43,8 +43,8 @@ infixl 0 .
 
 quotMod :: (Signed a, Integral a) => a -> a -> (a, a)
 {- | Returns the integer whose product by the divisor is closer to the 
-   dividend, and the remainder, positive or negative, whose absolute value is 
-   always less or equal to half the divisor (minimal absolute value).
+   dividend, and the remainder, positive or negative, whose absolute value 
+   is always less or equal to half the divisor (minimal absolute value).
    It should keep: 'n = q*d + r', minimizing 'abs r'. 
 -}
 quotMod divisor n 

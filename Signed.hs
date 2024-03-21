@@ -110,7 +110,7 @@ instance Num Bool where
 
 
 data Term = S { 
-   sSgn :: Bool,   -- Signum of Term
+   sSgn :: Bool,  -- Signum of Term
    sAbs :: Int    -- Absolut value (unsigned integer) of Term
 } deriving (Eq)
    
@@ -144,8 +144,12 @@ instance Enum Term where
 -}
 
 instance Ord Term where
-   -- compare absolutes!
-   compare (S _ x1) (S _ x2) = compare x1 x2
+
+   compare (S s1 x1) (S s2 x2) 
+      | s1 && s2 = compare x1 x2
+      | s1 = GT
+      | s2 = LT
+      | True = compare x2 x1
 
 
 instance Signed Term where
@@ -155,6 +159,7 @@ instance Signed Term where
    sgn (S s _)    = s
    abs (S _ a)    = S True a
    sgnAbs (S s a) = (s, S True a)
+
 
 instance Num Term where
 
