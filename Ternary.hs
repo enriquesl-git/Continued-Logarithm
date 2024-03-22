@@ -35,7 +35,7 @@ module Ternary (
    cmp, sgnTerms, absTerms, compareAbs, minAbs,  -- comparation
    neg, add, sub, -- arithmetic 
    pw3, ntTripl, ntThird, mul, sqr, npSqr,   -- quarter, geometric
-   -- sqrtStep, sqrtRem, sqrtMod,  -- inverse
+   divStep, -- sqrtStep, sqrtRem, sqrtMod,  -- inverse
 ) where
 
 -- import Prelude hiding (abs, signum)
@@ -75,15 +75,6 @@ pair2i (x, y) = (toInteger x, toInteger y)
 instance Ord Ternary where
 
    -- Needed to be processed from greater term down to the smaller one
-   -- (<=) (NT []) ys  = sgn ys
-   -- (<=) (NT xs) (NT ys)
-      -- | sx /= sy  = sy
-      -- | ax /= ay  = sy && ax < ay
-      -- | True      = NT (init xs) <= NT (init ys)
-      -- where
-      -- S sx ax = last xs
-      -- S sy ay = last ys
-      
    compare x y = cmp (toTerms x) (toTerms y)
 
 
@@ -129,9 +120,6 @@ instance Num Ternary where
       Should be an 'unfold' or equivalent to it.
       Used in Num instance. -}
       
-   -- fromInteger       = fromTerms . i2terms
-   -- i2terms :: Integer -> [Term]  -- is: Integer Signed
-   -- i2terms = fromI 0 where -- reverse $
    fromInteger = NT . fromI 0  -- reverse $
       where
       fromI _ 0 = []
@@ -147,9 +135,7 @@ instance Num Ternary where
    signum _          = -1
    negate (NT x)     = NT (neg x)
    (+) x y = fromTerms $ add (toTerms x) (toTerms y)
-   -- (*) x y = fromTerms $ mul (toTerms x) (toTerms y)
-   (*) (NT x) (NT y) = fromTerms $ mul x y
-
+   (*) x y = fromTerms $ mul (toTerms x) (toTerms y)
 
 
 instance Integral Ternary where
@@ -158,27 +144,21 @@ instance Integral Ternary where
    {- | From non-positional ternary to Integer, admits negative terms,
    it also defines the recursive homographic transformation. 
    Used in Integral instance. -}
-   -- toInteger = terms2i . toTerms
-   -- terms2i :: [Term] -> Integer
-   -- terms2i = foldr transform 0 where 
    toInteger (NT t) = foldr transform 0 t where 
       transform (S s a) 
          -- = (+) $ (*. s) . (^ a) $ 3
          -- = (+) $ (*. s) . (3 ^) $ a
          -- = (+) $ (*. s) $ 3 ^ a
          = (* 3 ^ a) . (+. s)    -- Differential
-   -- terms2i (S s a : xs) = ((terms2i xs +. s) * 3 ^ a)
-   -- terms2i _      = 0
 
 
    {- | Returns quotient with positive rest always -}
-   -- divMod = quotRem
-   -- quotRem n d
-      -- | sgn r  = (q    , r)
-      -- | sgn d  = (q - 1, r + d)
-      -- | True   = (q + 1, r - d)
-      -- where
-      -- (q, r) = divMod n d
+   divMod n d
+      | sgn r  = (q    , r)
+      | sgn d  = (q - 1, r + d)
+      | True   = (q + 1, r - d)
+      where
+      (q, r) = quotRem n d
 
 
    {- Euclidean recursive division, minimum absolute rest.
@@ -199,9 +179,15 @@ instance Integral Ternary where
 
 
 
--- divStep :: Ternary -> Ternary -> (Ternary, Ternary)
+---------------------------------------------------------------------------
+{- = Inverse geometric operations, with integer rest: 
+   division, square root, gcd, -}
+---------------------------------------------------------------------------
+
+
 divStep :: [Term] -> [Term] -> [Term] -> ([Term], [Term])
-{- | Returns quotient which gives rest less than divisor. 
+{- | Returns quotient which gives rest less than divisor,
+   or . 
    On each single division step calculates SINGLE TERM 
    quotient which minimizes absolute rest, and the new rest; 
    
@@ -209,11 +195,13 @@ divStep :: [Term] -> [Term] -> [Term] -> ([Term], [Term])
    d = divisor; q = quotient; r = rest or module. -}
 divStep _ q [] = (q, [])
 divStep d q r
-   | ar < ad   = (q, r)
-   -- | dupr >      S.abs d   = (sub rNew d, [succ qDif])
-   -- | dupr < neg (S.abs d)  = (add rNew d, [pred qDif])
-   | True      = divStep d qNew rNew   
-   -- | True      =  (qNew, rNew)   
+   | ar < ad               = (q, r) -- most cases arrives here, not all
+   -- | True         = divStep d qNew rNew   
+   | True         = case compareAbs r rNew of 
+      LT -> (q, r)
+      EQ -> (q, r)
+      GT -> divStep d qNew rNew   
+      -- GT -> (qNew, rNew)   
    where
    -- dupr = add rNew rNew
    S sd ad = head d   -- divisor greatest term
@@ -282,8 +270,8 @@ absTerms x = if sgnTerms x then x else neg x
 compareAbs :: [Term] -> [Term] -> Ordering 
 compareAbs x y = cmp (absTerms x) (absTerms y)
 
-{- | Minimum of the absolute values, 
-   must be used for every rest. -}
+{- | Minimum when comparing absolute values, 
+   should be used for every rest. -}
 minAbs :: [Term] -> [Term] -> [Term] 
 minAbs x y
    = case compareAbs x y of
@@ -322,35 +310,6 @@ sub = add . neg
 neg :: [Term] -> [Term]
 neg = fmap sNeg
 
-{- | Carry for arithmetic operations, 
-   carry is to reorganize terms to avoid intermediate repeated or 
-   consecutive terms, thus minimizing the number of terms. It should 
-   get each truncation the closest possible to the real value. Final 
-   consecutive terms can stay only if previous term has the same sign. 
-   O(log n) because recursion is not all of the times, 
-   so it will stop recurring in a length proportional to log n, as much.
--}
-{-
-carry :: [Term] -> [Term]
-carry (a : b : xs)
-   -- | a > succ b      = a : carry (b : xs)
-   | negA == b       = carry xs
-   | a == b          = sucA : carry (negA : xs)
-   -- | negA == sucB    = carry (negB : xs)
-   -- | a == sucB       = carry $ sucA : carry (negB : xs)
-   | a < b           = carry $ b : a : xs    -- sort
-   where
-   negA = sNeg a
-   negB = sNeg b
-   sucA = succ a
-   sucB = succ b
-carry xs = xs
--}
-
-{- | carryAll is the recursive application of carry. Not used -}
--- carryAll :: [Term] -> [Term]
--- carryAll (x : xs) = carry $ x : carryAll xs
--- carryAll _        = []
 
 
 -----------------------------------------------------------------------
@@ -476,15 +435,4 @@ sqr _ = []
 npSqr (NT x) = NT (sqr x)
 -- npSqr (NT [S _ x]) = oneSInt (dup x) -- single term square
 
-
----------------------------------------------------------------------------
-{- = Inverse geometric operations, with integer rest: 
-   division, square root, gcd, -}
----------------------------------------------------------------------------
-
-
--- divStep (NT r) (NT d) =
---    where
---    (r, d) = ()
---
 
