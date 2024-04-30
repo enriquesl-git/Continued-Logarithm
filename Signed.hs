@@ -154,8 +154,8 @@ instance Ord Term where
 
 instance Signed Term where
    
-   (+.) (S s a) True    = S s (a + 1)
-   (+.) (S s a) False   = S s (a - 1)
+   (+.) s False   = pred s  -- pred
+   (+.) s True    = succ s  -- succ
    sgn (S s _)    = s
    abs (S _ a)    = S True a
    sgnAbs (S s a) = (s, S True a)

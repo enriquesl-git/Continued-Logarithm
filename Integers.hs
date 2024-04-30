@@ -49,7 +49,7 @@ quotMod :: (Signed a, Integral a) => a -> a -> (a, a)
 -}
 quotMod divisor n 
    | -(r - ad) <  r  = (q +. sd, r - ad)  -- r > 0
-   |   r + ad <= -r  = (q -. sd, r + ad)  -- r < 0, limit included
+   |   r + ad  < -r  = (q -. sd, r + ad)  -- r < 0, limit included
    | True            = (q, r)             -- |d| - |r| >= |r|
    where
    (sd, ad) = sgnAbs divisor
@@ -108,20 +108,22 @@ mInv p x
 raiz :: Integer -> Integer
 -- | Integer root (floor root) using Babylonian method, 
 -- big numbers acceleration on initial value based on GMP library: 
--- more or less it is to find the power of two nearest to the root
+-- more or less it is to find the closest power of two to the root.
 -- raiz :: Signed t => t -> t
 raiz n
-   | n > 1     = babylon initVal
    | n < 0     = error $ "Negative input in Integers.raiz. "
-   | True      = n   -- avoids division by 0, and empty list problem with 1
+   | n < 2     = n   -- avoids division by 0, and empty list problem with 1
+   | n > r * (1 + r)    = 1 + r  -- for minimum absolute rest
+   | True               = r
    where
-   
+   r = babylon initVal
+
    babylon a  
-      | a > b  = babylon b    -- recursion, positive rest
-      | True   = a            -- output: (floor root, rest)
-      where b  = half . (+ a) . iquot a $ n -- b = (a + n/a)/2
+      | a <= b = b            -- output: (floor root, rest)
+      | True   = babylon b    -- recursion, positive rest
+      where b  = iquot 2 . (+ a) . iquot a $ n -- b = (n/a + a)/2
       
-   initVal     = (loSqr *) . (+ 1) . raiz . (`quot` hiSqr) $ n
+   initVal     = (loSqr *) . (+ 1) . raiz . iquot hiSqr $ n
    -- initVal     = loSqr * raiz (iquot hiSqr n)
       where (loSqr, hiSqr) = sqrPair n
 
@@ -209,7 +211,9 @@ squares :: Integer -> [Integer]
 squares = iterate (^ 2)  -- 2^2^n
 
 -- sqrPair :: Signed a => a -> (a, a)
-sqrPair n = last $ zip (1 : sq) sq
+sqrPair n 
+   | n <= 1 = error "Argument must be > 1, in Integers.sqrPair. "
+   | True   = last $ zip (1 : sq) sq
    where sq = takeWhile (<= n) $ squares 2
 
 dup2x3 :: Signed a => [(a, a)]
