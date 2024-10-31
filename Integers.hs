@@ -128,6 +128,18 @@ raiz n
       where (loSqr, hiSqr) = sqrPair n
 
 
+-- rootStep r digit n
+
+   -- = babylon r
+   
+   -- where
+
+   -- babylon a  
+      -- | a <= b = b            -- output: (floor root, rest)
+      -- | True   = babylon b    -- recursion, positive rest
+      -- where b  = iquot 2 . (+ a) . iquot a $ n -- b = (n/a + a)/2
+
+
 squareRoot :: Integer -> Integer
 -- | From the Haskell wiki, inspired on GMP library
 (^!) :: Num a => a -> Int -> a

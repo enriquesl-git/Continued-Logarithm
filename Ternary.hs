@@ -36,7 +36,7 @@ module Ternary (
    neg, add, sub,    -- arithmetic 
    cmp, sgnTerms, absTerms, compareAbs, minAbs, -- comparation
    pw3, ntTripl, ntThird, mul, sqr, ntSqr,      -- quarter, geometric
-   divStep, rootStep, root, rootRem, log3       -- inverse
+   divStep, root, rootRem, log3       -- inverse
 ) where
 
 -- import Prelude hiding (abs, signum)
@@ -167,14 +167,17 @@ instance Integral Ternary where
 
 
    {- Euclidean recursive division, minimum absolute rest.
-      Division is a recursive subtraction.  -}
+      Division is a recursive subtraction; recursively tries q values, 
+      from aq down to 0 -}
    quotRem _ 0 = error "Division by 0, in Ternary.quotRem. "
    quotRem 0 _ = (0, 0)
-   quotRem (NT r) (NT d) = divStep (NT r) (0, NT d) aq
+   -- quotRem (NT r) (NT d) = divStep (NT d) (0, NT r) qs
+   quotRem (NT r) (NT d) = foldl' (divStep (NT d)) (0, NT r) qs
       where
       ad = sAbs $ head d   -- divisor greatest term
       ar = sAbs $ head r   -- rest greatest term
       aq = 1 + ar - ad     -- initial q to try
+      qs = reverse [0 .. aq]     -- initial q to try
 
 
 ---------------------------------------------------------------------------
@@ -182,63 +185,46 @@ instance Integral Ternary where
    division, square root, gcd, -}
 ---------------------------------------------------------------------------
 
-{- Recursive square root, minimum absolute rest.
- -}
-rootRem :: Ternary -> (Ternary, Ternary)
+{- Square root, minimum absolute rest.
+   Recursively tries q values, from half aq down to 0. -}
+rootRem :: Ternary -> PairNT
 rootRem (NT (S False _ : _))  = error "Square root of negative number, in Ternary.root"
 rootRem 0 = (0, 0)
-rootRem r0  | r0 > q*(1 + q)  = (1 + q, r - (1 + q + q))  -- for min absolute
-            | True            = (    q, r)
+rootRem (NT r0) = foldl' rootStep (0, NT r0) qs
    where
-   (q, r) = rootStep (qNew, rNew) aq
-
-   -- Initial values when odd 'ar': rNew = r0 - qNew*qNew; 2*aq = ar - 1   
-   (qNew, rNew) 
-      | odd ar && r0 > level  = (NT [S sr aq], r0 - NT [S sr (ar - 1)]) 
-      | True                  = (0, r0)     
-
-   -- 'level' is the semisum of consecutive squares
-   level  = NT . fmap (toTerm) . reverse $ [1 .. ar - 1]
-   toTerm x = S (odd x) x
-
-   NT (S sr ar : _) = r0   -- rest greatest term and sign
-   aq = half ar            -- initial q to try, rounding down when 'ar' odd
-
-
+   qs = reverse . fmap half $ [0 .. ar]
+   ar = sAbs $ head r0   -- rest greatest term
+      
 root :: Ternary -> Ternary
 root = fst . rootRem
 
 
--- recursively tries q values, from aq down to 0 
-divStep :: Ternary -> (Ternary, Ternary) -> Int -> (Ternary, Ternary)
+{- Returns new value if it produces lesser absolute rest -}
+divStep :: Ternary -> PairNT -> Int -> PairNT
 divStep d (q, r) aq
-   | aq < 0    = (q,  r)  -- RESULT
-   | acceptQ   = divStep d (qNew, rNew) (aq - 1)
-   | True      = divStep d (q,    r   ) (aq - 1)
+   | rejectQ   = (q   , r   )
+   | True      = (qNew, rNew)
    where
+   -- '=' to promote positive rest, smaller quotient
+   -- rejectQ = S.abs r <= S.abs rNew 
+   rejectQ  | sr    = rNew <= -r
+            | True  = rNew >  -r   -- rDif < 2*r 
+   (qNew, rNew) = ( q + qDif, r - rDif )
+      where
+      qDif = NT [S (sr == sd) aq] 
+      rDif = qDif * d   
+   sr = sgn r
    sd = sgn d
-   sr = sgn r
-   acceptQ  | sr    = rNew >  -r   -- rDif < 2*r
-            | True  = rNew <= -r   -- '=' to promote positive rest
-   
-   (qDif, rDif) = (NT [S (sr == sd) aq], qDif * d)   
-   (qNew, rNew) = (q + qDif, r - rDif)
 
-
--- recursively tries q values, from aq down to 0
-rootStep :: (Ternary, Ternary) -> Int -> (Ternary, Ternary)
-rootStep (q, r) aq
-   | aq < 0    = (q,  r)  -- RESULT
-   | acceptQ   = rootStep (qNew, rNew) (aq - 1)
-   | True      = rootStep (q,    r   ) (aq - 1)
+{- Returns new value if it produces lesser absolute rest. 
+   Root step is trying division of the rest over the new root tried, 
+   to see if it produces a lesser rest. -}
+rootStep :: PairNT -> Int -> PairNT
+rootStep (q, r) aq = divStep d (q, r) aq
    where
-   
+   d     = q + qNew 
+   qNew  = q + NT [S sr aq]
    sr = sgn r
-   acceptQ  | sr    = rNew >  -r    -- rDif < 2*r
-            | True  = rNew <= -r    -- '=' to promote positive rest
-   
-   (qDif, rDif) = (NT [S sr aq], qDif * (q + qNew) )   
-   (qNew, rNew) = (q + qDif, r - rDif)
 
 
 {- | Closest power of 3 -}
