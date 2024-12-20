@@ -19,7 +19,10 @@ Then, the type Ternary is defined as a reversed list of the cummulative
 Terms, such that an element value is the sum of them up to it:
 ```
   377 = NT [0-,3-,1- 1- 1]
-      = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(1 + 3^1))))
+      = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(-1 + 3^1))))
 ```
 It should be an instance of `Integral` and `Signed`, so it should
 implementmet methods for: `Ord`, `Num`, `Signed`, `Integral`
+
+Integer division and square root, `quotRem`and `rootRem`, returns the closest one, 
+so that remainder will be negative if it closer to zero than the positive one. 
