@@ -11,28 +11,37 @@
 -- Nonpositional Ternary ('Ternary', NT) data type and its operations.
 -- 
 -- It is first defined a type Term, and then, an ordered list of them 
--- starting by the greatest one, 'Ternary = NT [Term]', such that negative 
--- terms are represented with the '-' sign behind the value (exponent of 3). 
+-- starting by the greatest one, such that negative terms are represented 
+-- with the '-' sign behind the value (exponent of 3). 
+
 -- An example is: 
 --   377 = NT [6, 5-, 4-, 3-, 0-] 
 --       = - 3^0 - 3^3 - 3^4 - 3^5 + 3^6
 --       = 3^6 - 3^5 - 3^4 - 3^3 - 3^0
 --  
--- Then, the type Continued Ternary (CT) is defined as a reversed list of the 
--- Nonpositional Ternary (cummulative Terms), such that an element value is 
+-- Then, the type 'Ternary = NT [Term]' is defined as a reversed list of the 
+-- Nonpositional Ternary (differential Terms), such that an element value is 
 -- the sum of them up to it:
 --   377 = NT [0-,3-,1- 1- 1] 
---       = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(1 + 3^1))))
+--       = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(-1 + 3^1*(1 + 0)))))
 
+-- This way has advantages: 
+--    - multiplying/dividing by power of 3 (shift) is O(n) instead of O(1),
+--      so that full multiplication is quite slower
+--    - addition is also slower, because carry is backwards
+-- Cons, advantages of accumulated:
+--    - first term gives information of sign and "size";
+--    - comparations are faster
+--
 -- They both should be an instance of 'Integral' and 'Signed', so it should 
 -- implementmet methods for: Ord, Num, Signed, Integral 
 -- 
 -----------------------------------------------------------------------------
 
 module Ternary (
-   Term(..), Ternary(..), PairNT, -- data types
+   Term(..), Ternary(..), NT(..), PairNT, -- data types
    half, dup, sgn,   -- from imported modules
-   oneTerm, pair2i,  -- conversion
+   oneTerm, pair2i, accumulate, decumulate,  -- conversion
    neg, add, sub,    -- arithmetic 
    cmp, sgnTerms, absTerms, compareAbs, minAbs, -- comparation
    pw3, ntTripl, ntThird, mul, sqr, ntSqr,      -- quarter, geometric
@@ -61,12 +70,15 @@ default ()
 {- | Ternary will be an instance of:
    (Ord, Num, Integral, Signed, Num, Integral, Real, Foldable?) -}
 newtype Ternary = NT [Term] deriving (Eq, Show, Read)
+type NT = Ternary   -- just for brevity
 
--- type NT = Ternary   -- just for brevity
 type PairNT = (Ternary, Ternary)
-
 pair2i :: PairNT -> (Integer, Integer)
 pair2i (x, y) = (toInteger x, toInteger y)
+
+type PairTerms = ([Term], [Term])
+pairt2i :: PairTerms -> (Integer, Integer)
+pairt2i (x, y) = (toInteger $ NT x, toInteger $ NT y)
 
 
 ---------------------------------------------------------------------------
@@ -76,8 +88,11 @@ pair2i (x, y) = (toInteger x, toInteger y)
 instance Ord Ternary where
 
    -- Needed to be processed from greater term down to the smaller one
-   compare (NT x) (NT y) = cmp x y
-
+   compare (NT x) (NT y) = cmp x y  -- Cummulative
+   -- compare (NT x) (NT y) = cmp accX accY  -- Differential
+      -- where -- greatest term first
+      -- accX = reverse $ accumulate x
+      -- accY = reverse $ accumulate y
 
 -- instance Foldable Ternary where
 
@@ -99,10 +114,10 @@ instance Real Ternary where
 
 instance Signed Ternary where
 
-   (+.) a s          = a + NT [S s 0] -- a +- 1
+   (+.) a s          = a + NT [T s 0] -- a +- 1
    sgn (NT [])       = True
-   -- sgn (NT x)        = sSgn $ last x
-   sgn (NT x)        = sSgn $ head x
+   sgn (NT x)        = tSgn $ last x   -- differential, smaller first
+   -- sgn (NT x)        = tSgn $ head x   -- accumulated, greatest first
 
 {- = 
    Conversion from and to Decimal base notation: 
@@ -116,19 +131,19 @@ instance Num Ternary where
    {- | Gives in each step the closest power of 3. 
       That way, truncation will give the best approximation. 
       
-      If odd subtract 1 and write 0, if even divide by 3 and count. 
+      If (n mod 3 == 0) divide by 3 and count, else subtract 1 and write 0
       Write times counted. 
         x0 = 3^a0*sgn + x1; [a0,a1,...,an] == 3^a0 + 3^a1 + ... + 3^an
       Should be an 'unfold' or equivalent to it.
       Used in Num instance. -}
       
-   fromInteger = NT . reverse . fromI 0  -- reverse $
+   fromInteger = NT . fromI 0  -- reverse $
       where
       fromI _ 0 = []
       fromI a n
          | r == 0    =               fromI (1 + a) q
-         | True      = S (sgn r) a : fromI (1 + a) q  -- Cummulative
-         -- | True      = S (sgn r) a : fromI (1 ) q -- Differential
+         -- | True      = T (sgn r) a : fromI (1 + a) q  -- Cummulative
+         | True      = T (sgn r) a : fromI (1 ) q -- Differential
          where (q, r) = quotMod 3 n -- minimizes absolute rest
 
    abs               = snd . sgnAbs
@@ -150,11 +165,11 @@ instance Integral Ternary where
    Used in Integral instance. -}
    -- toInteger (NT t) = foldl transform 0 t where 
    toInteger (NT t) = foldr transform 0 t where 
-      transform (S s a) 
+      transform (T s a) 
          -- = (+) $ (*. s) . (^ a) $ 3
          -- = (+) $ (*. s) . (3 ^) $ a
-         = (+) $ (*. s) $ 3 ^ a  -- Cummulative
-         -- = (* 3 ^ a) . (+. s)    -- Differential
+         -- = (+) $ (*. s) $ 3 ^ a  -- Cummulative
+         = (* 3 ^ a) . (+. s)    -- Differential
 
 
    {- | Returns quotient with positive rest always -}
@@ -171,13 +186,23 @@ instance Integral Ternary where
       from aq down to 0 -}
    quotRem _ 0 = error "Division by 0, in Ternary.quotRem. "
    quotRem 0 _ = (0, 0)
-   -- quotRem (NT r) (NT d) = divStep (NT d) (0, NT r) qs
-   quotRem (NT r) (NT d) = foldl' (divStep (NT d)) (0, NT r) qs
+   -- quotRem (NT r) (NT d) = divStep d qs (0, r)
+   -- quotRem (NT r) (NT d) = (NT q, NT r)
+      -- where
+      -- (q, r) = foldl' (divStep d) qs ([], r)
+   quotRem (NT r) (NT d) = (NT quotient, NT remainder)
       where
-      ad = sAbs $ head d   -- divisor greatest term
-      ar = sAbs $ head r   -- rest greatest term
-      aq = 1 + ar - ad     -- initial q to try
-      qs = reverse [0 .. aq]     -- initial q to try
+      -- (quotient, remainder) = foldr f ([], r) qs
+      -- f x xs = divStep d xs x
+      -- (quotient, remainder) = f qs where
+         -- f (x : xs) = divStep d x (f xs)
+         -- f [] = ([], r)
+      (quotient, remainder) = foldr (divStep d) ([], r) qs
+      
+      ad = tVal . last . accumulate $ d   -- divisor greatest term
+      ar = tVal . last . accumulate $ r   -- rest greatest term
+      aq = 1 + ar - ad  -- initial q to try
+      qs = [0 .. aq]    -- list of q to try
 
 
 ---------------------------------------------------------------------------
@@ -185,91 +210,155 @@ instance Integral Ternary where
    division, square root, gcd, -}
 ---------------------------------------------------------------------------
 
+{- Returns new value if it produces lesser absolute rest -}
+divStep :: [Term] -> Int -> ([Term], [Term]) -> ([Term], [Term])
+divStep _ _ (q, []) = (q, [])
+divStep d aq (q, r)
+   | rejectQ   = (q   , r   )
+   | True      = (qNew, rNew)  -- rDif < 2*r 
+   where
+   -- '=' to promote smaller quotient, positive rest
+   -- rejectQ = S.abs r <= S.abs rNew (not rDif < 2*r)
+   -- The way here is almost like using abs, but using less 
+   -- comparitions, and gives more control of cases
+   rejectQ  | sr    = not (GT == cmp rNew (neg r)) -- rNew <= -r (rNew too much negative)
+            | True  =      GT == cmp rNew (neg r)  -- rNew >  -r (rNew too much)
+   (qNew, rNew) = ( add q qDif, sub rDif r )
+      where
+      qDif = [T (sr == sd) aq]                                          
+      rDif = mul qDif d   -- (sr == sd) *. pw3 aq $ d
+   sr = sgn $ NT r
+   sd = sgn $ NT d
+
+
 {- Square root, minimum absolute rest.
    Recursively tries q values, from half aq down to 0. -}
 rootRem :: Ternary -> PairNT
-rootRem (NT (S False _ : _))  = error "Square root of negative number, in Ternary.root"
-rootRem 0 = (0, 0)
-rootRem (NT r0) = foldl' rootStep (0, NT r0) qs
+-- rootRem ()  = error "Square root of negative number, in Ternary.root"
+rootRem (NT n) = (NT quotient, NT remainder)
    where
-   qs = reverse . fmap half $ [0 .. ar]
-   ar = sAbs $ head r0   -- rest greatest term
+   (quotient, remainder) = foldr rootStep (qNew, rNew) qs
+   -- (quotient, remainder) = f qs
+      -- where
+      -- f [] = ([], n)
+      -- f (x : xs) = rootStep x (f xs)
+   sr    = sgn $ NT n
+   qNew  = [T sr ar] 
+   rDif  = [T True (ar + ar)] -- mul qNew qNew
+   rNew  = sub rDif n
       
+   qs = [0 .. ar - 1]   -- up to half of rest greatest term
+
+   -- The maximum number whose integer square root has maximum ternary digit 4 
+   -- is the square of x = [ 0, 1, 1, 1, 1] plus itself, equal to 
+   --    x*(x + 1) = [ 0, 1, 1, 1, 1]*[ 0-, 1-, 1-, 1-, 1-, 1] = 
+   --    =  [ 0-, 1, 1-, 1, 1-, 1, 1-, 1, 1-, 1]
+   -- Then, in order to try a first digit for integer square root of n, 
+   -- we should start by the integer half of the higher accumulated digit of 
+   -- this form which is the closest greater to n. 
+   -- 
+   -- Greatest digit of a square greater than n
+   -- ar = half $ length (maxi n) - 1
+   ar = fst (maxi n)
+maxi [] = 0
+maxi n = last . takeWhile ((GT ==) . cmp n . snd) $ indexRange
+indexRange = zip [0 ..] $ fmap range [0 ..]
+
+   
+-- (i, x): maximum number x whose maximum digit i is the same that 
+-- the maximum digit of the root of n: 
+range i = take (2*i) ranges
+
+-- List of maximum numbers for each ternary digit
+ranges :: [Term]
+-- ranges = iterate (++ [-1, 1]) [-0, 1] -- (++ [-1,1])
+ranges = concat . ([-0, 1] :) $ repeat [-1,1]
+
+
 root :: Ternary -> Ternary
 root = fst . rootRem
 
 
-{- Returns new value if it produces lesser absolute rest -}
-divStep :: Ternary -> PairNT -> Int -> PairNT
-divStep d (q, r) aq
+{- Returns new value if it produces lesser absolute rest. 
+   Root step tries division of the rest over the new root tried, 
+   to see if it produces a lesser rest. -}
+rootStep :: Int -> ([Term], [Term]) -> ([Term], [Term])
+rootStep _ (q, []) = (q, [])  -- exact root
+-- rootStep aq (q, r) = divStep d aq (q, r)
+-- rootStep aq (q, r) = (qNew, rNew)
+rootStep aq (q, r) 
    | rejectQ   = (q   , r   )
    | True      = (qNew, rNew)
    where
-   -- '=' to promote positive rest, smaller quotient
-   -- rejectQ = S.abs r <= S.abs rNew 
-   rejectQ  | sr    = rNew <= -r
-            | True  = rNew >  -r   -- rDif < 2*r 
-   (qNew, rNew) = ( q + qDif, r - rDif )
-      where
-      qDif = NT [S (sr == sd) aq] 
-      rDif = qDif * d   
-   sr = sgn r
-   sd = sgn d
+   sr    = sgn $ NT r
+   qDif  = [T sr aq] 
+   qNew  = add q qDif
+   
+   d     = add qNew q   -- now it is like dividing r by d
+   rDif  = mul qDif d 
+   rNew  = sub rDif r
+   -- '=' to promote smaller quotient, positive rest
+   -- rejectQ = S.abs r <= S.abs rNew (not rDif < 2*r)
+   -- The way here is almost like using abs, but using less 
+   -- comparitions, and gives more control of cases
+   -- rejectQ  | sr    = not (GT == cmp rNew (neg r)) -- rNew <= -r (rNew too much negative)
+            -- | True  =      GT == cmp rNew (neg r)  -- rNew >  -r (rNew too much)
+   rejectQ  | sr    = not (GT == cmp r maxRem) -- rNew <= -r (rNew too much negative)
+            | True  =     (GT == cmp r maxRem)  -- rNew >  -r (rNew too much)
+   maxRem = add (range aq) $ mul qDif q   -- maximum remainder
+   
+   
+   -- (qNew, rNew) = ( add qDif q, sub rDif r )
+   -- d = add qNew q
+   -- qDif = [T sr aq]                                          
+   -- rDif = mul qDif d   -- (sr == sd) *. pw3 aq $ d
 
-{- Returns new value if it produces lesser absolute rest. 
-   Root step is trying division of the rest over the new root tried, 
-   to see if it produces a lesser rest. -}
-rootStep :: PairNT -> Int -> PairNT
-rootStep (q, r) aq = divStep d (q, r) aq
-   where
-   d     = q + qNew 
-   qNew  = q + NT [S sr aq]
-   sr = sgn r
 
 
 {- | Closest power of 3 -}
 log3 :: [Term] -> Int
-log3 (x0 : x1 : xs)
-   |  sNeg x0 == succ x1
-   && (sgn (NT xs) == sSgn x1
+log3 (x0 : x1 : xs)  -- abs <= [xo, tNeg (pred x0)]
+   |  tNeg x0 == succ x1
+   && (sgn (NT xs) == tSgn x1
    || xs == [])
-                     = sAbs x1
-log3 (x0 : _)        = sAbs x0
+                     = tVal x1
+log3 (x0 : _)        = tVal x0
 log3 _               = error "Logarithm of 0 in Ternary.log3"
+-- head . dropWhile (< abs x) $ iterate (* 3) 2
 
 
 
 ---------------------------------------------------------------------------
 {- = 
-   Conversion from and to 'Terms' (list of 'Term': [Term]).
+   Conversion from and to accumulated 'Terms' (list of 'Term': [Term]).
    'Terms' are greatest first, and accumulated, 
       21 = [ 3, 2-, 1] = 3^3 - 3^2 + 3
-   'Ternary' is smallest first, and differential.
+   'Ternary' should be smallest first, and differential.
       21 = NT [ 1, 1-, 1] = ((( 1 )*3 - 1 )*3 + 1 )*3
 -}
 ---------------------------------------------------------------------------
 
-{-
--- to Terms from Ternary
--- cumulate, greatest first
-toTerms :: Ternary -> [Term]
-toTerms (NT t) = reverse $ zipWith (S) s a where
-   s = fmap sSgn t
-   a = scanl1 (+) . fmap sAbs $ t
 
--- from Terms to Ternary
--- uncumulate, differentiate, smallest first
-fromTerms :: [Term] -> Ternary
-fromTerms t = NT $ zipWith S s d where
-   rt = reverse t
-   s = fmap sSgn rt
-   a = fmap sAbs rt
-   d = zipWith (-) a (0 : a)
--}
+-- accumulate, greatest first
+accumulate :: [Term] -> [Term]
+accumulate t = zipWith T s a where
+   -- t = reverse rt
+   s = fmap tSgn t
+   v = fmap tVal t
+   a = scanl1 (+) v 
+
+-- decumulate, differentiate, smallest first
+decumulate :: [Term] -> [Term]
+decumulate t = zipWith T s d where
+   -- t = reverse rt
+   s = fmap tSgn t
+   v = fmap tVal t
+   d = zipWith (-) v (0 : v)
+
 
 oneTerm :: Int -> Ternary
 oneTerm x
-   | sgn x  = NT [S True x]
+   | sgn x  = NT [T True x]
    | True   = error "Negative argument in Ternary.oneTerm. "
 
 ---------------------------------------------------------------------------
@@ -278,17 +367,23 @@ oneTerm x
 ---------------------------------------------------------------------------
 
 cmp :: [Term] -> [Term] -> Ordering 
-cmp (x : xs) (y : ys)
-      | x < y  = LT 
-      | x > y  = GT
-      | True   = cmp xs ys      
-cmp (x : _) [] = if sSgn x then GT else LT
-cmp [] (y : _) = if sSgn y then LT else GT
-cmp [] []    = EQ
+-- Needs greatest term first on inputs
+cmp x y = cmp' accX accY  -- Differential
+   where -- greatest term first
+   accX = reverse $ accumulate x
+   accY = reverse $ accumulate y
+
+   cmp' (x : xs) (y : ys)
+         | x < y  = LT 
+         | x > y  = GT
+         | True   = cmp' xs ys      
+   cmp' (x : _) [] = if tSgn x then GT else LT
+   cmp' [] (y : _) = if tSgn y then LT else GT
+   cmp' [] []    = EQ
 
 sgnTerms :: [Term] -> Bool
 sgnTerms [] = True
-sgnTerms x = sSgn $ head x
+sgnTerms x = sgn $ NT x
 
 absTerms :: [Term] -> [Term]
 absTerms [] = []
@@ -310,30 +405,60 @@ minAbs x y
 {- | Addition, for both, positive and negative terms 
 -}
 add, sub :: [Term] -> [Term] -> [Term]
--- Addition when notation is smallest term first
--- add xs [] = xs
--- add [] xs = xs
--- add [y] (x : xs)
-   -- |      x ==      y   = sNeg y : add [succ y] xs -- carry
-   -- |      x == sNeg y   =                       xs
-   -- | sAbs x >  sAbs y   =      y :          x : xs
-   -- | True               =      x :      add [y] xs -- carry
--- add (y : ys) xs         = add [y] $     add ys  xs -- recursion
+-- Addition when notation is smallest term first. 
 
--- Addition when notation is greatest term first
-add xs [] = xs
+-- -- A good way to do it is to accumulate, do the calculus, and deccumulate 
+-- add xs ys = decumulate $ addCumul (accumulate xs) (accumulate ys)
+   -- -- where
+-- addCumul xs [] = xs 
+-- -- addCumul [] ys = ys
+ -- -- single term
+-- addCumul [y] (x : xs) 
+   -- | tVal x > tVal y    = y : x : xs
+   -- | tVal x < tVal y    = x : addCumul [y] xs
+   -- | x == y             = tNeg y : addCumul [succ x] xs   -- Carry
+   -- | True               = xs  -- x == tNeg y 
+-- -- Now, recursion: 
+-- -- addCumul (y : ys) xs = addCumul [y] $ addCumul xs ys -- swap, much faster
+-- addCumul ys xs = foldr f ys xs
+   -- where f y = addCumul [y]
+
+
+-- Now, recursion: 
 add [] xs = xs
-add [y] (x : xs)
-   |      x ==     y    = succ y : sNeg x : xs -- carry
-   | sNeg x ==     y    =                   xs
-   | sAbs x < sAbs y    =      y :      x : xs
-   | True               = add [x ,      y]  xs -- carry
-add (y : ys) xs         = add [y] $ add ys  xs -- recursion
+add (T sy vy : ys) xs = addTerm (T sy vy) . add xs $ pw3 vy ys -- swap, much faster; accumulate ys
+   where
+-- add ys xs = foldr f xs ys
+   -- where 
+   -- f (T sy vy) = (addTerm (T sy vy) . pw3 vy)
+   -- single term
+   addTerm x [] = [x] 
+   addTerm (T sy vy) (T sx vx : xs) 
+      | vx > vy   = T sy vy       :          T sx (vx - vy) : xs
+      | vx < vy   = T sx vx       : addTerm (T sy (vy - vx))  xs
+      | sx == sy  = T (not sy) vy : addTerm (T sy 1)          xs -- Carry
+      | True      = pw3 vx xs -- x == tNeg y ; accumulate xs
 
-sub = add . neg
+
+sub [] xs = xs
+sub (T sy vy : ys) xs = subTerm (T sy vy) . sub (pw3 vy ys) $ xs  -- accumulate ys
+   where
+-- sub ys xs = foldr f xs ys
+   -- where 
+   -- f (T sy vy) = subTerm (T sy vy) . pw3 vy
+   -- single term
+   subTerm x [] = [tNeg x] 
+   subTerm (T sy vy) (T sx vx : xs) 
+      | vx > vy   = T (not sy) vy :    T sx (vx - vy) : xs
+      | vx < vy   = T sx vx : subTerm (T sy (vy - vx))  xs
+      | sx /= sy  = T sy vy : subTerm (T sy 1        )  xs -- Carry
+      | True      = pw3 vx xs -- x == y ; accumulate xs
+
+
+-- sub = add . neg
 
 neg :: [Term] -> [Term]
-neg = fmap sNeg
+neg = fmap tNeg
 
 
 
@@ -346,7 +471,16 @@ neg = fmap sNeg
 -- it should be checked that n >= -v; otherwise result would be rounded, 
 -- (or fractional CLog should be defined).
 pw3 :: Int -> [Term] -> [Term]
-pw3 = fmap . incr
+pw3 n (x : xs) = incr n x : xs 
+pw3 n _ = [] 
+
+
+-- Terms double, triple and quadruple
+tdup, tquad, ttripl :: [Term] -> [Term]
+-- tdup x = add x x
+tdup   x = sub x $ mul [1] x   -- not slower than add x x, because simpler cases
+ttripl x =         mul [1] x
+tquad  x = add x $ mul [1] x
 
 
 -- | Triplicate: multiply by 3, faster than add; 
@@ -397,30 +531,48 @@ ntQuad x   = x + ntTripl x
 mul, mulE  :: [Term] -> [Term] -> [Term]
 
 -- | Product by a one term element, equivalent to pw3
--- mul [S sa aa] [S sb ab] = [S (sa == sb) (aa + ab)]
--- mul [S sx ax] (S s v : ys) = S (sx == s) (ax + v) : mul [S sx ax] ys
-mul [S True ax] = pw3 ax
-mul [S _    ax] = pw3 ax . neg 
+-- mul [T sa aa] [T sb ab] = [T (sa == sb) (aa + ab)]
+-- mul [T sx ax] (T s v : ys) = T (sx == s) (ax + v) : mul [T sx ax] ys
+mul [T True ax] = pw3 ax
+mul [T _    ax] = pw3 ax . neg 
 -- mul xs [y] = mul [y] xs
 
--- general product, several methods can be chosen
--- mul x = mulE x
-mul x = mulS x
+-- General product, several methods can be chosen
+mul x = mulE x
+-- mul x = mulS x
 -- mul x = mulF x
 
 {- | Multiplication. Egyptian method, O(n^2). It is a 
    'concatMap', or 'foldMap', mapping 'mul' and folding 'add' 
 -}
-mulE xs (S sb ab : ys) 
-   = add (mul [S sb ab] xs) 
-   $ mulE ys xs   -- faster because of symetry
-mulE _ _  = []
+-- mulE xs ys = foldr f 0 $ accumulate ys
+
+-- mulE xs ys = foldr f [] ys
+   -- where 
+   -- f (T s v) 
+      -- | s      = pw3 v . (add xs)   -- Differential
+      -- | True   = pw3 v . (sub xs) 
+   
+mulE (y : ys) xs 
+   = add (mul [y] xs) 
+   $ mulE xs (pw3 (tVal y) ys)   -- faster because of symetry
+mulE _ _  = [] 
+
+--   377 = NT [0-,3-,1- 1- 1] 
+--       = 3^0*(-1 + 3^3*(-1 + 3^1*(-1 + 3^1*(-1 + 3^1*(1 )))))
+   -- toInteger (NT t) = foldr transform 0 t where 
+      -- transform (T s a) 
+         -- = (* 3 ^ a) . (+. s)    -- Differential
+
+
+
+
 
 {- | Straightforward multiplication, O(n^2), -}
-mulS (S sa aa : xs) (S sb ab : ys) 
-   = add [S (sa == sb) (aa + ab)] 
-   . add (mul [S sa aa] ys)
-   . add (mul [S sb ab] xs)
+mulS (T sa aa : xs) (T sb ab : ys) 
+   = add [T (sa == sb) (aa + ab)] 
+   . add (mul [T sa aa] ys)
+   . add (mul [T sb ab] xs)
    $ mulS xs ys
 mulS _ _ = []
 
@@ -436,22 +588,20 @@ mulS _ _ = []
 
 {- | Square, O(n^2), faster than @mul xs xs@ -}
 sqr :: [Term] -> [Term]
-
--- | recursive version:  x^2 + (2*x*xs + xs^2)
--- supposedly faster, as the term x^2 is calculated appart in a simpler way
--- sqr (S s x : xs)
-   -- = add (S True (x + x) : sqr xs)     -- x^2 + xs^2 + 
-   -- $ mul [S s (x + 1), S (not s) x] xs -- xs * (x + x), in ternary
-
--- | non-recursive version:  x^2 + (2*x + xs)*xs
-sqr (S s x : xs) =
-   add [S True (x + x)] 
-   . mul xs $ S s (x + 1) : S (not s) x : xs
-
+-- | recursive version:  2*x*xs + (x^2 + xs^2), slightly faster than just 
+-- multiplying, as the terms x^2 and 2·x are calculated appart in a simpler way
+sqr (T s x : xs) = add 
+   ( mul [T s (x + 1), T (not s) x] xs )  -- 2·x·xs
+   ( T True (x + x) : sqr xs )            -- x^2 + xs^2, recursion
+   
+   -- non-recursive version
+   -- sqr (T s x : xs) = add [T True (x + x)]  -- x^2
+   -- $ mul xs ( T s (x + 1) : T (not s) x :  xs )  -- 2·x·xs
+   
 sqr _ = []
 
 -- ntSqr :: Ternary -> Ternary
 ntSqr (NT x) = NT (sqr x)
--- ntSqr (NT [S _ x]) = oneSInt (dup x) -- single term square
+-- ntSqr (NT [T _ x]) = oneSInt (dup x) -- single term square
 
 

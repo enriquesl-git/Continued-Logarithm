@@ -65,11 +65,11 @@ pair2i (x, y) = (toInteger x, toInteger y)
 
 instance Ord Binary where
 
-   (<=) (NB (S sx ax : xs)) (NB (S sy ay : ys))
+   (<=) (NB (T sx ax : xs)) (NB (T sy ay : ys))
       | sx /= sy  = sy
       | ax /= ay  = sy && ax < ay
       | True      = NB xs <= NB ys
-   (<=) (NB (S sx _ : _)) _  = not sx
+   (<=) (NB (T sx _ : _)) _  = not sx
    (<=) _ y  = sgn y
 
 
@@ -81,8 +81,8 @@ instance Enum Binary where
 
 instance Signed Binary where
 
-   (+.) a s          = a + NB [S s 0] -- a +- 1
-   sgn (NB (x : _))  = sSgn x
+   (+.) a s          = a + NB [T s 0] -- a +- 1
+   sgn (NB (x : _))  = tSgn x
    sgn _             = True
 
 
@@ -108,7 +108,7 @@ instance Integral Binary where
       | end    = (0, rNext) 
       | True   = (qNew, rNew) 
       where
-      end   = sAbs qNext == 0   -- rs < ds  ==>  qNew == q
+      end   = tVal qNext == 0   -- rs < ds  ==>  qNew == q
       qNew  = NB [qNext] + q    -- accumulates q, without passing an accumulator
       (q, rNew)      = divMod rNext ds
       (qNext, rNext) = divStep rs ds
@@ -147,7 +147,7 @@ instance Real Binary where
    Used in Integral instance. -}
 terms2i :: [Term] -> Integer
 terms2i = foldr transform 0 where
-   transform (S s a)
+   transform (T s a)
       = (+) $ (*. s) . (^ a) $ 2
 
 {- | Gives in each step the closest power of 2 (the lesser when two 
@@ -161,15 +161,15 @@ i2terms :: Integer -> [Term]  -- is: Integer Signed
 i2terms x = reverse $ i2terms' 0 x where 
    i2terms' _ 0 = []
    i2terms' a n
-      | r ==  1   = S True  a : i2terms' (2 + a) q
-      | r == -1   = S False a : i2terms' (2 + a) q
+      | r ==  1   = T True  a : i2terms' (2 + a) q
+      | r == -1   = T False a : i2terms' (2 + a) q
       | r ==  0   = i2terms' (2 + a) q 
       | True      = i2terms' (1 + a) (half n) -- 1 + dup q
       where (q, r) = quotMod 4 n
 
 oneTerm :: Int -> Binary
 oneTerm x 
-   | sgn x  = NB [S True x]
+   | sgn x  = NB [T True x]
    | True   = error "Negative argument in Binary.oneTerm. "
 
 ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ add xs ys            = add ys xs
 sub = add . neg
 
 neg :: [Term] -> [Term]
-neg = fmap sNeg
+neg = fmap tNeg
 
 {- | Carry for arithmetic operations, 
    carry is to reorganize terms to avoid intermediate repeated or 
@@ -207,8 +207,8 @@ carry (a : b : xs)
    | a == sucB       = carry $ sucA : carry (negB : xs)
    | a < b           = carry $ b : a : xs    -- sort
    where
-   negA = sNeg a
-   negB = sNeg b
+   negA = tNeg a
+   negB = tNeg b
    sucA = succ a
    sucB = succ b
 carry xs = xs
@@ -231,9 +231,9 @@ carry xs = xs
 pw2 :: Int -> [Term] -> [Term]
 pw2 n  = fmap (pw2term n)
    where
-   pw2term n (S s v)
+   pw2term n (T s v)
       | vn < 0 = error "Third of non-multiple of 3, in Ternary.pw3. "
-      | True   = S s $ fromIntegral vn -- conversion to natural
+      | True   = T s $ fromIntegral vn -- conversion to natural
       where vn = fromIntegral v + n    -- conversion from natural
 
 -- | quarter: like dividing by 4; 
@@ -254,27 +254,27 @@ npHlf (NB x)   = NB $ pw2 (-1) x
 {- | Square, O(n^2), faster than @mul xs xs@ -}
 -- sqr :: Binary -> Binary
 sqr :: [Term] -> [Term]
--- sqr (S s x : xs) = carry
-   -- . (S True (dup x) :)
+-- sqr (T s x : xs) = carry
+   -- . (T True (dup x) :)
    -- . mul xs 
-   -- $ (S s (x + 1) : xs) -- (2*x + xs)*xs
-sqr (S s x : xs) = carry
-   . (S True (dup x) :)
-   . add (mul [S s (x + 1)] xs)  -- multiplication by one term, more efficient
+   -- $ (T s (x + 1) : xs) -- (2*x + xs)*xs
+sqr (T s x : xs) = carry
+   . (T True (dup x) :)
+   . add (mul [T s (x + 1)] xs)  -- multiplication by one term, more efficient
    $ sqr xs -- (2*x + xs)*xs
 sqr _ = []
 
 npSqr (NB x) = NB (sqr x)
--- npSqr (NB [S _ x]) = oneTerm (dup x) -- single term square
+-- npSqr (NB [T _ x]) = oneTerm (dup x) -- single term square
 
 -- mul, mulF  :: Binary -> Binary -> Binary
 mul, mulE, mulF  :: [Term] -> [Term] -> [Term]
 
 -- product by a one term element, equivalent to pw2
--- mul [S sa aa] [S sb ab] = [S (sa == sb) (aa + ab)]
--- mul [S sx ax] (S s v : ys) = S (sx == s) (ax + v) : mul [S sx ax] ys
-mul [S True ax] ys = pw2 (fromIntegral ax) ys
-mul [S _    ax] ys = pw2 (fromIntegral ax) $ neg ys
+-- mul [T sa aa] [T sb ab] = [T (sa == sb) (aa + ab)]
+-- mul [T sx ax] (T s v : ys) = T (sx == s) (ax + v) : mul [T sx ax] ys
+mul [T True ax] ys = pw2 (fromIntegral ax) ys
+mul [T _    ax] ys = pw2 (fromIntegral ax) $ neg ys
 mul xs [y] = mul [y] xs
 -- general product, several methods can be chosen
 mul x y = mulE x y
@@ -283,14 +283,14 @@ mul x y = mulE x y
 
 {- | Multiplication
    Egyptian method, O(n^2) -}
-mulE xs (S sb ab : ys) = add (mul xs [S sb ab]) (mulE xs ys)
+mulE xs (T sb ab : ys) = add (mul xs [T sb ab]) (mulE xs ys)
 mulE _ _  = []
 
 {- | Straightforward multiplication, O(n^2) -}
-mulS (S sa aa : xs) (S sb ab : ys) = carry
-   . (S (sa == sb) (aa + ab) :)
-   . add (mul xs [S sb ab])
-   . add (mul [S sa aa] ys)
+mulS (T sa aa : xs) (T sb ab : ys) = carry
+   . (T (sa == sb) (aa + ab) :)
+   . add (mul xs [T sb ab])
+   . add (mul [T sa aa] ys)
    $ mulS xs ys
 mulS _ _ = []
 
@@ -314,19 +314,19 @@ divStep :: Binary -> Binary  -> (Term, Binary)
    and the new rest; keeps 'r + q*d' = constant, where: 
    d = divisor; q = quotient; r = rest or module. -}
 divStep _ 0 = error "Divided by 0 in Binary.divStep. "
-divStep 0 _ = (S True 0, 0)
+divStep 0 _ = (T True 0, 0)
 divStep (NB r) (NB d) = minimumBy comp candidates
    where
    -- positive rNew, reverse for optimization of steps 
-   candidates  = reverse $ (S True 0, NB r) : fmap qrPair digits
+   candidates  = reverse $ (T True 0, NB r) : fmap qrPair digits
       where
-      S sr ar  = head r
-      S sd ad  = head d
+      T sr ar  = head r
+      T sd ad  = head d
       digits   = [0 .. 1 + ar - ad]
       
       qrPair q = (qNew, NB rNew)
          where 
-         qNew  = S (sr == sd) q
+         qNew  = T (sr == sd) q
          rDif  = mul [qNew] d
          rNew  = sub rDif r
    
