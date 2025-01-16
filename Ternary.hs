@@ -40,12 +40,12 @@
 
 module Ternary (
    Term(..), Ternary(..), NT(..), PairNT, -- data types
-   half, dup, sgn,   -- from imported modules
    oneTerm, pair2i, accumulate, decumulate,  -- conversion
-   neg, add, sub,    -- arithmetic 
+   half, dup, sgn,   -- from imported modules
+   neg, add, sub, mul, sqr,    -- terms arithmetic 
    cmp, sgnTerms, absTerms, compareAbs, minAbs, -- comparation
-   pw3, ntTripl, ntThird, mul, sqr, ntSqr,      -- quarter, geometric
-   divStep, root, rootRem, log3       -- inverse
+   pw3, ntTripl, ntThird, ntDup, ntHalf, ntQuad, ntQuarter, ntSqr,      -- geometric
+   log3, root, rootRem, divStep, rootStep       -- inverse
 ) where
 
 -- import Prelude hiding (abs, signum)
@@ -199,8 +199,8 @@ instance Integral Ternary where
          -- f [] = ([], r)
       (quotient, remainder) = foldr (divStep d) ([], r) qs
       
-      ad = tVal . last . accumulate $ d   -- divisor greatest term
-      ar = tVal . last . accumulate $ r   -- rest greatest term
+      ad = tVal . head . accumulate $ d   -- divisor greatest term
+      ar = tVal . head . accumulate $ r   -- rest greatest term
       aq = 1 + ar - ad  -- initial q to try
       qs = [0 .. aq]    -- list of q to try
 
@@ -260,7 +260,8 @@ rootRem (NT n) = (NT quotient, NT remainder)
    -- Greatest digit of a square greater than n
    -- ar = half $ length (maxi n) - 1
    ar = fst (maxi n)
-maxi [] = 0
+maxi :: [Term] -> (Int, [Term])
+maxi [] = (0,[])
 maxi n = last . takeWhile ((GT ==) . cmp n . snd) $ indexRange
 indexRange = zip [0 ..] $ fmap range [0 ..]
 
@@ -341,7 +342,7 @@ log3 _               = error "Logarithm of 0 in Ternary.log3"
 
 -- accumulate, greatest first
 accumulate :: [Term] -> [Term]
-accumulate t = zipWith T s a where
+accumulate t = reverse $ zipWith T s a where
    -- t = reverse rt
    s = fmap tSgn t
    v = fmap tVal t
@@ -349,12 +350,12 @@ accumulate t = zipWith T s a where
 
 -- decumulate, differentiate, smallest first
 decumulate :: [Term] -> [Term]
-decumulate t = zipWith T s d where
-   -- t = reverse rt
+decumulate rt = zipWith T s d where
+   t = reverse rt
    s = fmap tSgn t
    v = fmap tVal t
    d = zipWith (-) v (0 : v)
-
+   
 
 oneTerm :: Int -> Ternary
 oneTerm x
@@ -370,8 +371,8 @@ cmp :: [Term] -> [Term] -> Ordering
 -- Needs greatest term first on inputs
 cmp x y = cmp' accX accY  -- Differential
    where -- greatest term first
-   accX = reverse $ accumulate x
-   accY = reverse $ accumulate y
+   accX = accumulate x
+   accY = accumulate y
 
    cmp' (x : xs) (y : ys)
          | x < y  = LT 
@@ -436,26 +437,24 @@ add (T sy vy : ys) xs = addTerm (T sy vy) . add xs $ pw3 vy ys -- swap, much fas
    addTerm (T sy vy) (T sx vx : xs) 
       | vx > vy   = T sy vy       :          T sx (vx - vy) : xs
       | vx < vy   = T sx vx       : addTerm (T sy (vy - vx))  xs
-      | sx == sy  = T (not sy) vy : addTerm (T sy 1)          xs -- Carry
+      | sx == sy  = T (not sy) vy : addTerm (T sy 1        )  xs -- Carry
       | True      = pw3 vx xs -- x == tNeg y ; accumulate xs
 
 
-sub [] xs = xs
-sub (T sy vy : ys) xs = subTerm (T sy vy) . sub (pw3 vy ys) $ xs  -- accumulate ys
-   where
--- sub ys xs = foldr f xs ys
-   -- where 
+-- sub [] xs = xs
+-- sub (T sy vy : ys) xs = subTerm (T sy vy) . sub (pw3 vy ys) $ xs  -- accumulate ys
+   -- where
    -- f (T sy vy) = subTerm (T sy vy) . pw3 vy
-   -- single term
-   subTerm x [] = [tNeg x] 
-   subTerm (T sy vy) (T sx vx : xs) 
-      | vx > vy   = T (not sy) vy :    T sx (vx - vy) : xs
-      | vx < vy   = T sx vx : subTerm (T sy (vy - vx))  xs
-      | sx /= sy  = T sy vy : subTerm (T sy 1        )  xs -- Carry
-      | True      = pw3 vx xs -- x == y ; accumulate xs
+   -- -- single term
+   -- subTerm x [] = [tNeg x] 
+   -- subTerm (T sy vy) (T sx vx : xs) 
+      -- | vx > vy   = T (not sy) vy :    T sx (vx - vy) : xs
+      -- | vx < vy   = T sx vx : subTerm (T sy (vy - vx))  xs
+      -- | sx /= sy  = T sy vy : subTerm (T sy 1        )  xs -- Carry
+      -- | True      = pw3 vx xs -- x == y ; accumulate xs
 
 
--- sub = add . neg
+sub = add . neg   -- faster than the upper explicit version
 
 neg :: [Term] -> [Term]
 neg = fmap tNeg
@@ -476,51 +475,40 @@ pw3 n _ = []
 
 
 -- Terms double, triple and quadruple
-tdup, tquad, ttripl :: [Term] -> [Term]
--- tdup x = add x x
-tdup   x = sub x $ mul [1] x   -- not slower than add x x, because simpler cases
-ttripl x =         mul [1] x
-tquad  x = add x $ mul [1] x
-
+tDup, tQuad, tTri, tHalf, tQuarter, tThird :: [Term] -> [Term]
+tDup x   = add x x
+-- tDup  x  = sub x $ tTri x   -- should not be slower than add x x, because simpler cases
+tQuad x  = add x $ tTri x
 
 -- | Triplicate: multiply by 3, faster than add; 
 -- third: like dividing by 3; 
 -- they are a particular case of product by power of 2: pw3
-ntTripl, ntThird :: Ternary -> Ternary
-ntTripl (NT x)   = NT $ pw3   1  x  -- takes more comparisons of conditions
-ntThird (NT x)   = NT $ pw3 (-1) x
+tTri     = pw3 1            -- mul [1]
+tThird   = pw3 (-1)            -- mul [1]
+
+half' :: [Term] -> [Term]
+half' (x : y : xs)
+   | x == tNeg y     =      half' xs
+   | x == y          = x  : half' xs
+half' [0] = []
+half' (x : xs) = x1 : half' (x1 : xs)
+   where x1 = pred x
+half' _  = []
+
+tHalf    = decumulate . half' . accumulate
+tQuarter = decumulate . half' . half' . accumulate
+   
+
+ntTripl, ntThird, ntDup, ntQuad, ntHalf, ntQuarter :: Ternary -> Ternary
+ntTripl (NT x)   = NT $ tTri  x  -- takes more comparisons of conditions
+ntThird (NT x)   = NT $ tThird x
 
 ntDup x    = x + x
 ntQuad x   = x + ntTripl x
 
--- ntHalf, ntQuarter :: [Term] -> [Term]
+ntHalf    (NT x) = NT . tHalf $ x
+ntQuarter (NT x) = NT . tQuarter $ x
 
--- ntHalf (NT n) = NT . h $ reverse n
-   -- where
-   -- h [a, b]
-      -- | a == 0    = [] -- a : b : xs
-      -- | sgn a /= sgn b    = reverse [b .. pred a] 
-      -- | True = a : fmap negate $ reverse [b .. pred a] 
-
-      -- -- | True      = add [a1] $ h (a1 : b : xs)
-      -- where [a1] = pw3 (-1) [a]
-   -- h [0] = []
-   -- h [a] = pw3 (-1) [a]
-   -- h [] = []
-
--- ntQuarter = ntHalf . ntHalf
-
--- quarter NT x = q x
---    where
---    (a : b : c : d : xs) = reverse x
---    [a1] = pw3 (-1) [a]
---    q x
---       | a > b  = a1 : a1 : a1 : b : c : d : xs
---       | a > c  = b : a1 : a1 : a1 : c : d : xs
---       | a > d  = b : c : a1 : a1 : a1 : d : xs
---       | True   =  a, q xs
---
---       | a == b && a == c && a == div= a : xs
 
 
 -----------------------------------------------------------------------
@@ -586,22 +574,23 @@ mulS _ _ = []
 --          sqSum = sqr $ add xs ys   -- squared sum:        (ys + xs)^2
 
 
-{- | Square, O(n^2), faster than @mul xs xs@ -}
+{- | Square, O(n^2), it should be faster than @mul xs xs@, but it is much slower -}
 sqr :: [Term] -> [Term]
--- | recursive version:  2*x*xs + (x^2 + xs^2), slightly faster than just 
+-- | recursive version:  2*x*xs + (x^2 + xs^2), should be slightly faster than just 
 -- multiplying, as the terms x^2 and 2·x are calculated appart in a simpler way
-sqr (T s x : xs) = add 
-   ( mul [T s (x + 1), T (not s) x] xs )  -- 2·x·xs
-   ( T True (x + x) : sqr xs )            -- x^2 + xs^2, recursion
-   
-   -- non-recursive version
-   -- sqr (T s x : xs) = add [T True (x + x)]  -- x^2
-   -- $ mul xs ( T s (x + 1) : T (not s) x :  xs )  -- 2·x·xs
-   
+sqr (T s x : xs) = T True (x + x) : sqrTail 
+   where
+   sqrTail 
+      | s       = add (tDup xs) $ sqr xs
+      | True    = sub (tDup xs) $ sqr xs
+   --  . (if s then add else sub) (tDup xs) $ sqr xs
 sqr _ = []
 
--- ntSqr :: Ternary -> Ternary
+ntSqr :: Ternary -> Ternary
 ntSqr (NT x) = NT (sqr x)
 -- ntSqr (NT [T _ x]) = oneSInt (dup x) -- single term square
 
 
+-- All powers of 3 are odd, so it is easy to know if a Ternary is even or odd
+isEven (NT x) = even $ length x
+isOdd  (NT x) = odd  $ length x
