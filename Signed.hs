@@ -38,6 +38,7 @@ class (Num t, Ord t, Read t) => Signed t where
    sgnAbs ::                        t -> (Bool, t)
    sgn ::                           t -> Bool
    abs  ::                          t -> t
+   signum  ::                       t -> t
    (*.), (/.), (+.), (-.) ::        t -> Bool -> t
    -- (+s), (-s) :: Signed c =>        c -> t -> t
    chSgn :: Signed c =>             c -> t -> t
@@ -54,17 +55,21 @@ class (Num t, Ord t, Read t) => Signed t where
 
    -- abs is the rest of extracting sgn
    abs = snd . sgnAbs
+   signum 0 = 0
+   signum a = if sgn a then 1 else -1
 
 
    -- Arithmetic with a boolean: True is like 1, False is like -1
    -- The Signed 'n' is scaled by the boolean
-   (*.) n True   = id n
-   (*.) n False  = negate n
-   (/.)          = (*.)
+   -- (*.) n True   = id n
+   -- (*.) n False  = negate n
+   n *. True   = id n
+   n *. False  = negate n
+   (/.)        = (*.)
    
-   (+.) n True   = (+ 1) n
-   (+.) n False  = (subtract 1) n
-   (-.) n        = (n +.) . not
+   n +. True   = (+ 1) n
+   n +. False  = (subtract 1) n
+   (-.) n      = (n +.) . not
 
 
    -- change last argument sign from first argument sign
@@ -75,7 +80,6 @@ class (Num t, Ord t, Read t) => Signed t where
    -- setSgn y  = chSgn y . abs
    -- setSgn y x  = sgn y *. abs x 
    
-
 
 instance Signed Integer
 instance Signed Int

@@ -48,9 +48,10 @@ module Ternary (
    log3, root, rootRem, divStep, rootStep       -- inverse
 ) where
 
--- import Prelude hiding (abs, signum)
+-- import Prelude hiding () -- (abs, signum)
+-- import Prelude as P --  hiding (abs, signum, mod, div, ($), ($!), (.))
 import Integers -- as I
-import Signed as S
+import Signed -- as S
 import Data.Foldable
 -- import Data.List -- unfold is not in Data.Foldable
 -- import Data.Sequence   -- better than List, faster
@@ -488,9 +489,9 @@ tThird   = pw3 (-1)            -- mul [1]
 
 half' :: [Term] -> [Term]
 half' (x : y : xs)
-   | x == tNeg y     =      half' xs
    | x == y          = x  : half' xs
-half' [0] = []
+   | x == tNeg y     =      half' xs
+half' [T _ 0] = []
 half' (x : xs) = x1 : half' (x1 : xs)
    where x1 = pred x
 half' _  = []
@@ -568,10 +569,9 @@ mulS _ _ = []
    where a = x + y; b = x - y ('F' for 'Fast' or 'Fermat').
    But ... quarter is not simple in Ternary.
    Complexity is mainly on sqr, as the rest of the algorithm is <~ O(size). -}
-
--- mulF xs ys = quarter $ sub sqSub sqSum   -- 1/4(A^2 - B^2)
---    where sqSub = sqr $ sub xs ys   -- squared difference: (ys - xs)^2
---          sqSum = sqr $ add xs ys   -- squared sum:        (ys + xs)^2
+mulF xs ys = tQuarter $ sub sqSub sqSum   -- 1/4(A^2 - B^2)
+   where sqSub = sqr $ sub xs ys   -- squared difference: (ys - xs)^2
+         sqSum = sqr $ add xs ys   -- squared sum:        (ys + xs)^2
 
 
 {- | Square, O(n^2), it should be faster than @mul xs xs@, but it is much slower -}
