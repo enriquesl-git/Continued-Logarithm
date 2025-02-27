@@ -121,6 +121,7 @@ data Term = T {
 tNeg :: Term -> Term
 -- Opposite of term
 tNeg (T s a) = T (not s) a
+-- tAbs (T _ a) = T True    a
 
 incr, decr ::  Int -> Term -> Term
 -- increments/decrements the absolute vale,
@@ -135,8 +136,8 @@ decr n      = incr (-n)
 
 instance Enum Term where
 
-   fromEnum (T s a)  = fromEnum a
-   toEnum x          = T True (toEnum ax)
+   fromEnum x  = fromEnum (tVal x)
+   toEnum   x  = Signed.abs (toEnum ax)
       where (sx, ax) = sgnAbs x
    -- pred (T _ 0) = error "Predecessor of '0' or '0-', in Ternary.Term. "
    pred (T s 0) = T s 0    -- in order to be a safe function. 
@@ -160,8 +161,8 @@ instance Signed Term where
    
    (+.) s False   = pred s  -- pred
    (+.) s True    = succ s  -- succ
-   sgn (T s _)    = s
-   abs (T _ a)    = T True a
+   sgn            = fst . sgnAbs
+   abs            = snd . sgnAbs
    sgnAbs (T s a) = (s, T True a)
 
 
