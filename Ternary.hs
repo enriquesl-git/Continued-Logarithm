@@ -39,13 +39,13 @@
 -----------------------------------------------------------------------------
 
 module Ternary (
-   Term(..), Ternary(..), NT(..), PairNT, -- data types
+   Term(..), Ternary(..), NT(..), PairNT,    -- data types
    oneTerm, pair2i, accumulate, decumulate,  -- conversion
    half, dup, sgn,   -- from imported modules
-   neg, add, sub, mul, sqr,    -- terms arithmetic 
-   cmp, sgnTerms, absTerms, compareAbs, minAbs, -- comparation
-   pw3, ntTri, ntThird, ntDup, ntHalf, ntQuad, ntQuarter, ntSqr,      -- geometric
-   log3, root, rootRem, divStep, rootStep       -- inverse
+   neg, add, sub, mul, sqr, sigma,    -- terms arithmetic 
+   cmp, sgnTerms, absTerms, compareAbs, minAbs, isEven, isOdd,    -- comparation
+   pw3, ntSqr, ntTri, ntThird, ntDup, ntHalf, ntQuad, ntQuarter,  -- geometric
+   log3, digitSquares, divStep, rootStep, rootRem, rootMod, root  -- inverse
 ) where
 
 -- import Prelude hiding () -- (abs, signum)
@@ -119,7 +119,7 @@ instance Real Ternary where
 instance Signed Ternary where
 
    (+.) a s          = a + NT [T s 0] -- a +- 1
-   sgn (NT [])       = True
+   sgn (NT [])       = True   -- positive means (>= 0)
    sgn (NT x)        = tSgn $ last x   -- differential, smaller first
    -- sgn (NT x)        = tSgn $ head x   -- accumulated, greatest first
 
@@ -212,68 +212,151 @@ divStep d aq (q, r)
    | True      = (q   , r   )
    where
    (qNew, rNew) = (             q + qDif, r - rDif ) 
-   (qDif, rDif) = ( NT [T (sr == sd) aq], d * qDif )                                        
-
-   -- The way here is almost like using abs, but using less 
-   -- comparitions, and gives more control of cases
-   --    rNew <= -r (rNew too much negative), '=' to promote positive rest
-   --    rNew >  -r (rNew too much)
-   acceptQ = (r > -rNew) == sr -- r > (rDif - r)
+   (qDif, rDif) = ( NT [T (sr == sd) aq], d*qDif )                                        
    sr = sgn r
    sd = sgn d
 
+   -- The way here is almost like using abs, but using less comparitions
+   --    rNew <= -r (rNew too much negative), '=' to promote positive rest
+   --    rNew >  -r (rNew too much)
+   acceptQ = sr == (-rNew < r) -- rDif < 2·r
 
-{- Returns new value if it produces lesser absolute rest. 
-   Root step tries division of the rest over the new root tried, 
-   to see if it produces a lesser rest. -}
+   -- r > d*qDif - r;  d*qDif < 2*r
+
+
+-- Rooooots ------
+
 rootStep :: Int -> PairNT -> PairNT
+
 -- rootStep aq (q, r) = divStep d aq (q, r)
-rootStep aq (q, r) 
-   | acceptQ   = (qNew, rNew)
-   | True      = (q   , r   )
+rootStep aq (q, r) = (qNew, rNew)
    where
-   (qNew, rNew) = (      q + qDif, r - rDif )
-   (qDif, rDif) = ( NT [T sr aq] , d * qDif )
+   (qNew, rNew) = (     q + qDif, r - rDif )
+   (qDif, rDif) = ( NT [T sr aq], d*qDif )  -- q*qDif + q*qDif + qDif^2 
+   -- rDif = d*qDif = 2·q·qDif + qDif^2  = (q + qDif)^2 - q^2
    d = q + qNew   -- now it is almost like dividing r by d
-   
-   -- The way here is almost like using abs, but using less 
-   -- comparitions, and gives more control of cases
-   acceptQ = (r > maxRem) == sr -- cmp rNew (maxRem - mul qDif qNew)
-      where maxRem = range aq + q * qDif   -- maximum remainder
    sr = sgn r
-   
-   
+
+
+digitSquares :: [Ternary]
+-- digitSquares = fmap (\i -> NT [T True i]) [0, 2 ..] 
+-- digitSquares = fmap (NT . (: []) . T True) [0, 2 ..] 
+digitSquares = fmap oneTerm [0, 2 ..] 
+
+
 {- Square root, minimum absolute rest. -}
 root :: Ternary -> Ternary
 root = fst . rootRem
 
 
+rootRem, rootMod :: Ternary -> PairNT
+
+
+-- This is the integer square root with minimal negative rest, from digit thQ.  
+-- That is, the minimal natural number whose square covers the input 'n'.
+rootMod n 
+   | 0 < r  = rootStep 0 (q, r)
+   | True   = (q, r)
+   where
+   (q, r)   = rootRem n 
+
+   
 {- Square root and minimum absolute rest.
    Recursively tries q values, from half aq down to 0. 
    Negative input does not produce error, instead, and correctly, 
-   it is just integer root 0, and rest the input mumber. -}
-rootRem :: Ternary -> PairNT
-rootRem n = foldr rootStep (0, n) [0 .. ar]
+   it is just integer root 0, and rest the input mumber. 
+-}
+rootRem n = foldr rootTerm (0, n) [0 .. ar]
    where
    -- In order to try a first digit for integer square root of n, 
    -- we should start by the higher accumulated digit of 
    -- 'range' form which is the closest greater to n. 
-   ar = maxi n -- greatest digit of a square greater than n
+   ar = length indexRange -- greatest digit of a square greater than n
       where
       -- i: maximum digit which is the same that 
       -- the maximum digit of the root of n: 
-      maxi :: Ternary -> Int
-      maxi n = length indexRange - 1
-         where indexRange = takeWhile (n >) $ fmap range [0 ..]
+      -- [2·i] <= 4·n ;  [2·i] == [i]^2  
+      indexRange = takeWhile (<= 4*n) digitSquares
+         
+   {- Returns new value if it produces lesser absolute rest. 
+      Root step tries division of the rest over the new root tried, 
+      to see if it produces a lesser rest. -}
+   rootTerm :: Int -> PairNT -> PairNT
+   rootTerm aq (q, r) 
+      | acceptQ   = (qNew, rNew)
+      | True      = (q   , r   )
+      where
+      (qNew, rNew) = rootStep aq (q, r)
+      sr = sgn r
+      
+         -- Using abs
+      -- acceptQ = ( range aq < Signed.abs r - Signed.abs q*qDif ) 
+
+         -- The way here is almost like using abs, but using less comparitions
+
+         -- Not using 'qDif'
+      acceptQ = sr == ( -rNew <= r + sigma (2*aq - 1) ) -- should work, correct
+      -- acceptQ = sr == ( 0 <= r + rNew + sigma (aq*2 - 1) ) -- should work, correct
+      -- acceptQ = sr == ( 0 < r + rNew + sigma (2*aq - 1) ) -- but this seems to work
+      -- acceptQ = sr == ( -rNew <= r + 2 * range aq ) -- !!!
+      -- acceptQ = sr == ( -rNew < r ) -- not correct!
+
+         -- Using 'qDif'
+     -- acceptQ = sr == ( range aq < r - q*qDif ) -- the faster one  
+      -- acceptQ = sr == ( range aq < rNew + qNew*qDif ) 
+      -- acceptQ = sr == ( 0 <= 2*(r + rNew) + ntSqr qDif ) 
+      -- acceptQ = sr == ( 2*range aq       < r + rNew + ntSqr qDif )
+      -- acceptQ = sr == ( 2*rDif <= 4*r + ntSqr qDif )  -- Slower
+         -- using 'sigma'
+      -- acceptQ = sr == ( sigma (aq*2 - 1) < 2*(r - q*qDif) ) -- !!!
+      -- acceptQ = sr == ( 0 < r + rNew + ntSqr qDif - sigma (aq*2 - 1) ) 
+
+         -- r   >  range aq + q*qDif;   q*qDif < r - range aq
+         -- 2·r >  ([2·aq] - 1)/2 + 2·q·[aq] ~= ( ([aq] + q)^2 - q^2 )/2 + q·[aq]
+         
+         -- 0 <= r + 3·rNew + 2·qNew·qDif
+         -- qDif^2 <= 4·(r - q·qDif)
+         -- (qNew + 3·q)·qDif <= 4·r
 
 
-range :: Int -> Ternary
--- The maximum number whose integer square root has maximum ternary digit 4 
--- is the square of x = [ 0, 1, 1, 1, 1] plus itself, equal to 
+----
+
+-- Here, 'range i' is the maximum number whose integer square root has 
+-- all accummulated ternary digits less than 'i'
+-- The maximum number whose integer square root has maximum accummulated ternary 
+-- digit i=4 is the square of x = [ 0, 1, 1, 1, 1] plus itself, equal to: 
 --    x*(x + 1) = [ 0, 1, 1, 1, 1]*[ 0-, 1-, 1-, 1-, 1-, 1] 
---              = [ 0-, 1, 1-, 1, 1-, 1, 1-, 1, 1-, 1]
+--              = [ 0-, 1, 1-, 1, 1-, 1, 1-, 1, 1-, 1] 
+--              = tQuarter [0-, 2*(i + 1)] ;  ([i + 1]^2 - [0])/4
+-- Correspondingly, it is one less than the minimum number whose integer 
+-- square root has maximum ternary digit i=5 
+range, sigma :: Int -> Ternary
+
+-- The sum of divisors of 3^i = NT [i], equal to the 
+-- maximum number whose maximum ternary digit is i. 
+--    2 * sigma (2*i - 1) = [2*i] - 1, by the usual calculation for sigma function
+--       i=0  --> [2*i] - 1 = 1 - 1 = 0
+--       i=2  --> 2*(1 + 3 + 9 + 27) = 81 - 1
+--    sigma 4 = NT [ 0, 1, 1, 1, 1] 
+--    sigma (2*i - 1) = 2 * range i
+-- sigma (-1) = 0 -- strictly 1/3, but must be integer
+sigma i | sgn i  
+   = NT $ 0 : replicate i 1
+sigma _ = 0 -- strictly not zero, but it must be integer
+-- sigma _ = error "Less than -1, in Ternary.sigma. "
+      
+-- range i = NT . concat . take i $ [-0, 1] : repeat [-1,1]
+-- range i = NT $ take (2*i) infiRange
+-- range i = NT . concat . ([-0, 1] :) . replicate i $ [-1,1]
 range i = NT . concat . take i $ [-0, 1] : repeat [-1,1]
 
+-- infinite lazy global constants, should be slightly faster and lighter access
+-- Not used, it is in fact slower, not faster
+allRanges = fmap range [0 ..] -- list of all possible ranges
+-- infiRange = concat $ [-0, 1] : repeat [-1,1] -- infinite range
+
+-- head . dropWhile (< abs x) $ iterate (* 3) 2
+   
 
 {- | Closest power of 3 -}
 log3 :: Terms -> Int
@@ -284,7 +367,6 @@ log3 (x0 : x1 : xs)  -- abs <= [xo, tNeg (pred x0)]
                      = tVal x1
 log3 (x0 : _)        = tVal x0
 log3 _               = error "Logarithm of 0 in Ternary.log3"
--- head . dropWhile (< abs x) $ iterate (* 3) 2
 
 
 
@@ -327,27 +409,29 @@ oneTerm x
 ---------------------------------------------------------------------------
 
 cmp :: Terms -> Terms -> Ordering 
--- Needs greatest term first on inputs
-cmp x y = cmp' accX accY  -- Differential
-   where -- greatest term first
-   accX = accumulate x
-   accY = accumulate y
+-- Needs greatest term first on inputs. 
+cmp x y = cmp' (accumulate x) (accumulate y)  -- Differential
+   where 
+   -- recursion first, faster
+   cmp' (x : xs) (y : ys) | x == y        = cmp' xs ys 
+   
+   cmp' (T True  vx : _) (T True  vy : _) = compare vx vy
+   cmp' (T True _   : _) _                = GT
+   cmp' _                (T True _   : _) = LT
+   cmp' (T _ vx : _)     (T _ vy     : _) = compare vy vx
+   
+   cmp' [] [] = EQ 
+   cmp' []  _ = GT 
+   cmp' _   _ = LT 
 
-   cmp' (x : xs) (y : ys)
-         | x == y = cmp' xs ys   -- recursion first, faster 
-         | x <  y = LT 
-         | True   = GT
-   cmp' (x : _) _ = if tSgn x then GT else LT
-   cmp' _ (y : _) = if tSgn y then LT else GT
-   cmp' _ _       = EQ
 
 sgnTerms :: Terms -> Bool
 sgnTerms [] = True
-sgnTerms x = sgn $ NT x
+sgnTerms x  = sgn $ NT x
 
 absTerms :: Terms -> Terms
 absTerms [] = []
-absTerms x = if sgnTerms x then x else neg x 
+absTerms x  = if sgnTerms x then x else neg x 
 
 compareAbs :: Terms -> Terms -> Ordering 
 compareAbs x y = cmp (absTerms x) (absTerms y)
@@ -355,8 +439,7 @@ compareAbs x y = cmp (absTerms x) (absTerms y)
 {- | Minimum when comparing absolute values, 
    should be used for every rest. -}
 minAbs :: Terms -> Terms -> Terms 
-minAbs x y
-   = case compareAbs x y of
+minAbs x y = case compareAbs x y of
    GT -> y
    LT -> x
    EQ -> x  -- being equal abs, the first is chosen 
@@ -443,7 +526,8 @@ half' :: [Term] -> [Term]  -- not Terms type, because Terms is not accumulated
 half' (x : y : xs)
    | x == -y   =      half' xs
    | x == y    = x  : half' xs
-half' [T _ 0] = []   -- half (+-1) 
+half' [T False 0] = [T False 0]  -- half (-1), in order to keep floor of half 
+half' [T _ 0] = []               -- half (+1) 
 half' (x : xs) = carry $ x1 : half' (x1 : xs)
    where 
    x1 = pred x
@@ -546,3 +630,4 @@ ntSqr (NT x) = NT (sqr x)
 -- All powers of 3 are odd, so it is easy to know if a Ternary is even or odd
 isEven (NT x) = even $ length x
 isOdd  (NT x) = odd  $ length x
+
