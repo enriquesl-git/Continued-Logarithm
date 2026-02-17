@@ -39,18 +39,17 @@
 -----------------------------------------------------------------------------
 
 module Ternary (
-   Term(..), Ternary(..), NT(..), PairNT,    -- data types
-   oneTerm, pair2i, accumulate, decumulate,  -- conversion
-   half, dup, sgn,   -- from imported modules
-   neg, add, sub, mul, sqr, sigma,    -- terms arithmetic 
+   Term(..), Ternary(..), NT(..), PairNT,          -- data types
+   oneTerm, minTerm, maxTerm,                      -- single ternary digits
+   toInteger2, toInteger3, accumulate, decumulate, -- conversion
+   sgn, neg, add, sub, mul, sqr, sigma, -- terms arithmetic. half, dup,  
    cmp, sgnTerms, absTerms, compareAbs, minAbs, isEven, isOdd,    -- comparation
    pw3, ntSqr, ntTri, ntThird, ntDup, ntHalf, ntQuad, ntQuarter,  -- geometric
-   log3, digitSquares, divStep, rootStep, rootRem, rootMod, root  -- inverse
+   log3, digitSquares, divStep, rootStep, rootTerm, rootRem, rootMod, root  -- inverse
 ) where
 
 -- import Prelude hiding () -- (abs, signum)
 -- import Prelude as P --  hiding (abs, signum, mod, div, ($), ($!), (.))
-import Integers -- as I
 import Signed -- as S
 import Data.Foldable
 -- import Data.List -- unfold is not in Data.Foldable
@@ -77,8 +76,11 @@ newtype Ternary = NT Terms deriving (Eq, Show, Read)
 toTerms (NT t) = t
 
 type PairNT = (Ternary, Ternary)
-pair2i :: PairNT -> (Integer, Integer)
-pair2i (x, y) = (toInteger x, toInteger y)
+toInteger2 :: PairNT -> (Integer, Integer)
+toInteger2 (x, y) = (toInteger x, toInteger y)
+
+toInteger3 :: Num t => (t, Ternary, Ternary) -> (t, Integer, Integer)
+toInteger3 (x, y, z) = (x, toInteger y, toInteger z)
 
 type PairTerms = (Terms, Terms)
 pairt2i :: PairTerms -> (Integer, Integer)
@@ -145,10 +147,12 @@ instance Num Ternary where
       where
       fromI _ 0 = []
       fromI a n
-         | r == 0    =               fromI (1 + a) q
-         -- | True      = T (sgn r) a : fromI (1 + a) q  -- Cummulative
-         | True      = T (sgn r) a : fromI (1 ) q -- Differential
-         where (q, r) = quotMod 3 n -- minimizes absolute rest
+         | r ==  0   =             fromI (1 + a) q
+         | r ==  2   = T False a : fromI  1 (1 + q) 
+         | r == -2   = T False a : fromI  1 (1 - q) 
+         | True      = T True  a : fromI  1      q 
+         where 
+         (q, r)   = (`divMod` 3) n
 
    abs               = snd . sgnAbs
    signum 0          =  0
@@ -159,7 +163,6 @@ instance Num Ternary where
    -- (*) x y = fromTerms $ mul (toTerms x) (toTerms y)
    (+) (NT x) (NT y) = NT $ add y x
    (*) (NT x) (NT y) = NT $ mul y x
-
 
 instance Integral Ternary where
 
@@ -226,16 +229,27 @@ divStep d aq (q, r)
 
 -- Rooooots ------
 
-rootStep :: Int -> PairNT -> PairNT
+rootStep :: PairNT -> Int -> PairNT
 
--- rootStep aq (q, r) = divStep d aq (q, r)
-rootStep aq (q, r) = (qNew, rNew)
+-- rootStep (q, r) aq = divStep d aq (q, r)
+-- rootStep (q, r) aq = (qNew, rNew)
+rootStep (q, r) aq 
+   | sgn qNew        = ( qNew, rNew)
+   | True            = (-qNew, rNew)   -- qNew always positive
    where
-   (qNew, rNew) = (     q + qDif, r - rDif )
    (qDif, rDif) = ( NT [T sr aq], d*qDif )  -- q*qDif + q*qDif + qDif^2 
    -- rDif = d*qDif = 2·q·qDif + qDif^2  = (q + qDif)^2 - q^2
-   d = q + qNew   -- now it is almost like dividing r by d
+   -- (qNew, rNew) = (     q + qDif, r - rDif )
+   -- d = q + qNew   -- now it is almost like dividing r by d
+
+   -- if qDif is greater than q, we should take the difference instead of the sum, 
+   -- but then, the new q (difference) must be greater than the previous one q: 
+   (qNew, d)
+      | sq == (qDif - q > q)  = (qDif - q, qNew - q)
+      | True                  = (qDif + q, qNew + q)  -- usual case
+   rNew = r - rDif
    sr = sgn r
+   sq = sgn q
 
 
 digitSquares :: [Ternary]
@@ -255,18 +269,18 @@ rootRem, rootMod :: Ternary -> PairNT
 -- This is the integer square root with minimal negative rest, from digit thQ.  
 -- That is, the minimal natural number whose square covers the input 'n'.
 rootMod n 
-   | 0 < r  = rootStep 0 (q, r)
+   | 0 < r  = rootStep (q, r) 0
    | True   = (q, r)
    where
    (q, r)   = rootRem n 
 
    
 {- Square root and minimum absolute rest.
-   Recursively tries q values, from half aq down to 0. 
+   Recursively tries q values, from 'ar' down to 0. 
    Negative input does not produce error, instead, and correctly, 
    it is just integer root 0, and rest the input mumber. 
 -}
-rootRem n = foldr rootTerm (0, n) [0 .. ar]
+rootRem n = foldr rootTerm (0, n) [0 .. ar - 1]
    where
    -- In order to try a first digit for integer square root of n, 
    -- we should start by the higher accumulated digit of 
@@ -278,45 +292,46 @@ rootRem n = foldr rootTerm (0, n) [0 .. ar]
       -- [2·i] <= 4·n ;  [2·i] == [i]^2  
       indexRange = takeWhile (<= 4*n) digitSquares
          
-   {- Returns new value if it produces lesser absolute rest. 
-      Root step tries division of the rest over the new root tried, 
-      to see if it produces a lesser rest. -}
-   rootTerm :: Int -> PairNT -> PairNT
-   rootTerm aq (q, r) 
-      | acceptQ   = (qNew, rNew)
-      | True      = (q   , r   )
-      where
-      (qNew, rNew) = rootStep aq (q, r)
-      sr = sgn r
-      
-         -- Using abs
-      -- acceptQ = ( range aq < Signed.abs r - Signed.abs q*qDif ) 
-
-         -- The way here is almost like using abs, but using less comparitions
-
-         -- Not using 'qDif'
-      acceptQ = sr == ( -rNew <= r + sigma (2*aq - 1) ) -- should work, correct
-      -- acceptQ = sr == ( 0 <= r + rNew + sigma (aq*2 - 1) ) -- should work, correct
-      -- acceptQ = sr == ( 0 < r + rNew + sigma (2*aq - 1) ) -- but this seems to work
-      -- acceptQ = sr == ( -rNew <= r + 2 * range aq ) -- !!!
-      -- acceptQ = sr == ( -rNew < r ) -- not correct!
-
-         -- Using 'qDif'
-     -- acceptQ = sr == ( range aq < r - q*qDif ) -- the faster one  
-      -- acceptQ = sr == ( range aq < rNew + qNew*qDif ) 
-      -- acceptQ = sr == ( 0 <= 2*(r + rNew) + ntSqr qDif ) 
-      -- acceptQ = sr == ( 2*range aq       < r + rNew + ntSqr qDif )
-      -- acceptQ = sr == ( 2*rDif <= 4*r + ntSqr qDif )  -- Slower
-         -- using 'sigma'
-      -- acceptQ = sr == ( sigma (aq*2 - 1) < 2*(r - q*qDif) ) -- !!!
-      -- acceptQ = sr == ( 0 < r + rNew + ntSqr qDif - sigma (aq*2 - 1) ) 
-
-         -- r   >  range aq + q*qDif;   q*qDif < r - range aq
-         -- 2·r >  ([2·aq] - 1)/2 + 2·q·[aq] ~= ( ([aq] + q)^2 - q^2 )/2 + q·[aq]
          
-         -- 0 <= r + 3·rNew + 2·qNew·qDif
-         -- qDif^2 <= 4·(r - q·qDif)
-         -- (qNew + 3·q)·qDif <= 4·r
+{- Returns new value if it produces lesser absolute rest. 
+   Root step tries division of the rest over the new root tried, 
+   to see if it produces a lesser rest. -}
+rootTerm :: Int -> PairNT -> PairNT
+rootTerm aq (q, r) 
+   | acceptQ   = (qNew, rNew)
+   | True      = (q   , r   )
+   where
+   (qNew, rNew) = rootStep (q, r) aq
+   sr = sgn r
+   
+      -- Using abs
+   -- acceptQ = ( range aq < Signed.abs r - Signed.abs q*qDif ) 
+
+      -- The way here is almost like using abs, but using less comparitions
+
+      -- Not using 'qDif'
+   acceptQ = sr == ( -rNew <= r + sigma (2*aq - 1) ) -- should work, correct
+   -- acceptQ = sr == ( 0 <= r + rNew + sigma (aq*2 - 1) ) -- should work, correct
+   -- acceptQ = sr == ( 0 < r + rNew + sigma (2*aq - 1) ) -- but this seems to work
+   -- acceptQ = sr == ( -rNew <= r + 2 * range aq ) -- !!!
+   -- acceptQ = sr == ( -rNew < r ) -- not correct!
+
+      -- Using 'qDif'
+  -- acceptQ = sr == ( range aq < r - q*qDif ) -- the faster one  
+   -- acceptQ = sr == ( range aq < rNew + qNew*qDif ) 
+   -- acceptQ = sr == ( 0 <= 2*(r + rNew) + ntSqr qDif ) 
+   -- acceptQ = sr == ( 2*range aq       < r + rNew + ntSqr qDif )
+   -- acceptQ = sr == ( 2*rDif <= 4*r + ntSqr qDif )  -- Slower
+      -- using 'sigma'
+   -- acceptQ = sr == ( sigma (aq*2 - 1) < 2*(r - q*qDif) ) -- !!!
+   -- acceptQ = sr == ( 0 < r + rNew + ntSqr qDif - sigma (aq*2 - 1) ) 
+
+      -- r   >  range aq + q*qDif;   q*qDif < r - range aq
+      -- 2·r >  ([2·aq] - 1)/2 + 2·q·[aq] ~= ( ([aq] + q)^2 - q^2 )/2 + q·[aq]
+      
+      -- 0 <= r + 3·rNew + 2·qNew·qDif
+      -- qDif^2 <= 4·(r - q·qDif)
+      -- (qNew + 3·q)·qDif <= 4·r
 
 
 ----
@@ -396,7 +411,17 @@ decumulate t = zipWith T s d where
    s = fmap tSgn r
    v = fmap tVal r
    d = zipWith (-) v (0 : v)
-   
+
+
+minTerm, maxTerm :: Ternary -> Int
+
+minTerm (NT []) = error "Empty head in Ternary.minTerm. "
+minTerm (NT (x:_)) = tVal x
+
+maxTerm (NT []) = error "Empty head in Ternary.maxTerm. "
+maxTerm (NT x) = tVal y
+   where (y:_) = accumulate x
+
 
 oneTerm :: Int -> Ternary
 oneTerm x
